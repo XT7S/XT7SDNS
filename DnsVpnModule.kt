@@ -84,7 +84,36 @@ class DnsVpnModule(private val ctx: ReactApplicationContext) :
                         ms = (System.nanoTime() - t0) / 1_000_000.0
                     }
                 }
-            } catch (_: Exception) {
+            } catch (ex: Exception) {
+            }
+            promise.resolve(ms)
+        }.start()
+    }
+
+    /** DNS lookup time (ms) of [domain] asked from [host]:53. -1 on timeout, error or empty answer. */
+    @ReactMethod
+    fun pingDomain(host: String, domain: String, promise: Promise) {
+        Thread {
+            var ms = -1.0
+            try {
+                val q = buildQuery(domain)
+                val addr = InetAddress.getByName(host)
+                DatagramSocket().use { s ->
+                    s.soTimeout = 2000
+                    val t0 = System.nanoTime()
+                    s.send(DatagramPacket(q, q.size, InetSocketAddress(addr, 53)))
+                    val b = ByteArray(1024)
+                    val rp = DatagramPacket(b, b.size)
+                    s.receive(rp)
+                    if (rp.length >= 12 && b[0] == q[0] && b[1] == q[1]) {
+                        val rcode = b[3].toInt() and 0x0F
+                        val answers = ((b[6].toInt() and 0xFF) shl 8) or (b[7].toInt() and 0xFF)
+                        if (rcode == 0 && answers > 0) {
+                            ms = (System.nanoTime() - t0) / 1_000_000.0
+                        }
+                    }
+                }
+            } catch (ex: Exception) {
             }
             promise.resolve(ms)
         }.start()
@@ -106,10 +135,10 @@ class DnsVpnModule(private val ctx: ReactApplicationContext) :
         ctx.startService(i)
     }
 
-    private fun buildQuery(): ByteArray {
+    private fun buildQuery(domain: String = "google.com"): ByteArray {
         val bo = ByteArrayOutputStream()
         bo.write(byteArrayOf(0x4A, 0x21, 0x01, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
-        for (label in "google.com".split(".")) {
+        for (label in domain.split(".")) {
             bo.write(label.length)
             bo.write(label.toByteArray())
         }

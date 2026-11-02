@@ -9,7 +9,7 @@ if (!fs.existsSync('app.json')) {
 const j = JSON.parse(fs.readFileSync('app.json', 'utf8'));
 const e = (j.expo = j.expo || {});
 
-e.name = 'Game DNS';
+e.name = 'Abrino DNS';
 e.orientation = 'portrait';
 e.userInterfaceStyle = 'dark';
 e.android = e.android || {};
