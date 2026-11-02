@@ -3,10 +3,23 @@
 const {
   withAndroidManifest,
   withDangerousMod,
+  withMainActivity,
   withMainApplication,
 } = require('expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
+
+// Asks Android to run the app at the highest refresh rate of the screen (90/120 Hz).
+const HZ_SNIPPET = `
+    try {
+      val best = windowManager.defaultDisplay.supportedModes.maxByOrNull { it.refreshRate }
+      if (best != null) {
+        val lp = window.attributes
+        lp.preferredDisplayModeId = best.modeId
+        window.attributes = lp
+      }
+    } catch (e: Exception) {
+    }`;
 
 function withDnsVpn(config) {
   const pkg = config.android && config.android.package;
@@ -64,6 +77,18 @@ function withDnsVpn(config) {
       }
       c = c.replace(re, (m) => `${m}\n              add(DnsVpnPackage())`);
       cfg.modResults.contents = c;
+    }
+    return cfg;
+  });
+
+  // 4) smooth UI: request the highest screen refresh rate (never fails the build)
+  config = withMainActivity(config, (cfg) => {
+    const m = cfg.modResults;
+    if (m.language === 'kt' && !m.contents.includes('preferredDisplayModeId')) {
+      const re = /super\.onCreate\([^)]*\)/;
+      if (re.test(m.contents)) {
+        m.contents = m.contents.replace(re, (x) => x + HZ_SNIPPET);
+      }
     }
     return cfg;
   });
