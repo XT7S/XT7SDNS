@@ -118,7 +118,7 @@ class DnsVpnModule(private val ctx: ReactApplicationContext) :
         return bo.toByteArray()
     }
 
-    override fun onActivityResult(activity: Activity?, requestCode: Int, resultCode: Int, data: Intent?) {
+    override fun onActivityResult(activity: Activity, requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode != REQ_VPN) return
         val p = pending
         val l = pendingDns
@@ -132,7 +132,7 @@ class DnsVpnModule(private val ctx: ReactApplicationContext) :
         }
     }
 
-    override fun onNewIntent(intent: Intent?) {}
+    override fun onNewIntent(intent: Intent) {}
 
     companion object {
         private const val REQ_VPN = 7001
