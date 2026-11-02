@@ -1,901 +1,1022 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+// AbrinoDNS — App.js
+// فقط از react-native و ماژول بومی موجود پروژه (NativeModules.DnsVpn) استفاده می‌کند.
+// متدهای واقعی ماژول (از DnsVpnModule.kt): start(dnsArray), stop(), isRunning(), loadPrefs(), savePrefs(json)
+// هیچ پکیج جدیدی لازم نیست.
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Alert,
   Animated,
-  BackHandler,
+  AppState,
   Easing,
+  Keyboard,
+  KeyboardAvoidingView,
+  LayoutAnimation,
   Linking,
   NativeModules,
   Platform,
+  Pressable,
   ScrollView,
-  Share,
   StatusBar,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
-  TouchableOpacity,
+  UIManager,
   View,
 } from 'react-native';
 
-const { DnsVpn } = NativeModules;
+// ─────────────────────────── تنظیمات قابل ویرایش ───────────────────────────
+// نام کاربری تلگرام خود را (بدون @) اینجا بگذارید، مثلاً 'abrinodns'
+const TELEGRAM_USERNAME = 'YOUR_TELEGRAM_USERNAME';
 
-const CHANNEL_URL = 'https://t.me/AbrinoDNS';
-const VERSION = '1.0';
+// دامنه‌های PUBG Mobile برای تست دسترسی
+const PUBG_DOMAINS = ['pubgmobile.com', 'igamecj.com', 'proximabeta.com'];
 
-/* ------------------------------------------------------------------ */
-/*  Colors                                                             */
-/* ------------------------------------------------------------------ */
+// سرورهای DNS آماده (فقط IPv4)
+const PRESETS = [
+  { id: 'google', name: 'Google', servers: ['8.8.8.8', '8.8.4.4'] },
+  { id: 'cloudflare', name: 'Cloudflare', servers: ['1.1.1.1', '1.0.0.1'] },
+  { id: 'quad9', name: 'Quad9', servers: ['9.9.9.9', '149.112.112.112'] },
+];
+// ───────────────────────────────────────────────────────────────────────────
+
+const DnsVpn = NativeModules.DnsVpn;
+const MAX_APPS = 30;
+
 const C = {
-  bg: '#04031A',
-  panel: '#0F0D2A',
-  panel2: '#171434',
-  line: '#241F4D',
-  blue: '#00A3FF',
-  purple: '#7B2CFF',
-  green: '#00E5A0',
-  iconBg: '#10264A',
-  iconFg: '#1E9BFF',
-  text: '#F3F5FF',
-  mute: '#8C90B5',
-  bad: '#FF4D6A',
-  warn: '#FFB300',
+  bg: '#040704',
+  card: '#09110A',
+  cardHi: '#0D1A0F',
+  line: '#123A18',
+  neon: '#39FF14',
+  neonDim: '#1E8F0C',
+  lime: '#C8FF00',
+  danger: '#FF3B5C',
+  text: '#E8FFE8',
+  muted: '#7FA583',
+  btnBg: '#07140A',
 };
 
-/* ------------------------------------------------------------------ */
-/*  Data                                                               */
-/* ------------------------------------------------------------------ */
-// Candidate DNS servers. The app measures all of them for the chosen game
-// and connects with the fastest one.
-const DNS_LIST = [
-  { id: 'google', name: 'Google', v4: ['8.8.8.8', '8.8.4.4'], v6: ['2001:4860:4860::8888', '2001:4860:4860::8844'] },
-  { id: 'cloudflare', name: 'Cloudflare', v4: ['1.1.1.1', '1.0.0.1'], v6: ['2606:4700:4700::1111', '2606:4700:4700::1001'] },
-  { id: 'quad9', name: 'Quad9', v4: ['9.9.9.9', '149.112.112.112'], v6: ['2620:fe::fe', '2620:fe::9'] },
-  { id: 'opendns', name: 'OpenDNS', v4: ['208.67.222.222', '208.67.220.220'], v6: ['2620:119:35::35', '2620:119:53::53'] },
-  { id: 'shecan', name: 'شکن', v4: ['178.22.122.100', '185.51.200.2'], v6: [] },
-  { id: 'electro', name: 'الکترو', v4: ['78.157.42.100', '78.157.42.101'], v6: [] },
-  { id: 'radar', name: 'رادار', v4: ['10.202.10.10', '10.202.10.11'], v6: [] },
-  { id: '403', name: '۴۰۳', v4: ['10.202.10.202', '10.202.10.102'], v6: [] },
-  { id: 'begzar', name: 'بگذر', v4: ['185.55.226.26', '185.55.225.25'], v6: [] },
-  { id: 'pishgaman', name: 'پیشگامان', v4: ['5.202.100.100', '5.202.100.101'], v6: [] },
-  { id: 'shatel', name: 'شاتل', v4: ['85.15.1.14', '85.15.1.15'], v6: [] },
-];
-
-// For every game we look up its own server names, so the winner is the DNS
-// that is really fastest for that game.
-const GAMES = [
-  { id: 'pubg', name: 'PUBG MOBILE', domains: ['igamecj.com', 'pubgmobile.com'] },
-  { id: 'codm', name: 'Call of Duty Mobile', domains: ['callofduty.com', 'activision.com'] },
-  { id: 'ff', name: 'Free Fire', domains: ['freefiremobile.com', 'garena.com'] },
-  { id: 'cr', name: 'Clash Royale', domains: ['clashroyale.com', 'supercell.com'] },
-  { id: 'coc', name: 'Clash of Clans', domains: ['clashofclans.com', 'supercell.com'] },
-  { id: 'bs', name: 'Brawl Stars', domains: ['brawlstars.com', 'supercell.com'] },
-  { id: 'ml', name: 'Mobile Legends', domains: ['mobilelegends.com', 'moonton.com'] },
-];
-
-const T = {
-  fa: {
-    settings: 'تنظیمات',
-    general: 'عمومی',
-    autoConnect: 'اتصال خودکار',
-    autoConnectSub: 'با باز کردن برنامه، خودش وصل می‌شود.',
-    customDns: 'DNS سفارشی',
-    customDnsSub: 'آدرس DNS را خودت وارد کن',
-    language: 'زبان',
-    channelSec: 'کانال و درخواست‌ها',
-    request: 'درخواست بازی یا برنامه',
-    channel: 'کانال تلگرام',
-    channelSub: 'خبرها، نسخه‌های جدید و پشتیبانی',
-    device: 'دستگاه',
-    deviceId: 'شناسه‌ی دستگاه',
-    deviceNote: 'برای گزارش مشکل این شناسه را بفرستید. ناشناس است و تغییر نمی‌کند.',
-    about: 'درباره',
-    update: 'بررسی به‌روزرسانی',
-    updateSub: 'آخرین نسخه را از کانال بگیر',
-    version: 'نسخه',
-    notConnected: 'وصل نیست',
-    tapConnect: 'برای اتصال ضربه بزنید',
-    scanning: 'در حال یافتن بهترین DNS...',
-    scanningSub: 'پینگ سرورها برای بازی انتخابی تست می‌شود',
-    connecting: 'در حال اتصال...',
-    connected: 'وصل شد',
-    tapDisconnect: 'برای قطع اتصال ضربه بزنید',
-    supported: 'بازی‌ها و برنامه‌های پشتیبانی‌شده',
-    showAll: 'نمایش همه',
-    showLess: 'نمایش کمتر',
-    join: 'عضویت در کانال تلگرام Abrino DNS',
-    results: 'نتیجه‌ی تست برای',
-    bestDns: 'بهترین DNS',
-    custom: 'سفارشی',
-    customTitle: 'DNS سفارشی',
-    presets: 'سرورها',
-    v4: 'DNS · نسخه ۴ (IPv4)',
-    v6: 'DNS · نسخه ۶ (IPv6)',
-    pingTest: 'تست پینگ',
-    connectCustom: 'اتصال با این DNS',
-    pingResult: 'نتیجه‌ی پینگ',
-    noModule: 'ماژول نیتیو پیدا نشد. این برنامه باید به‌صورت APK نصب شود.',
-    noServer: 'هیچ سروری جواب نداد. اینترنت را بررسی کن.',
-    noValid: 'حداقل یک آدرس DNS معتبر وارد کن.',
-    denied: 'اجازه VPN داده نشد.',
-    failed: 'اتصال برقرار نشد. دوباره امتحان کن.',
-    footer: 'فقط درخواست‌های DNS از طریق VPN عبور می‌کنند؛ ترافیک بازی مستقیم می‌رود و سرعتش کم نمی‌شود.',
-    pingNote: 'پینگ یعنی سرعت پاسخ DNS؛ نه پینگ داخل بازی.',
-  },
-  en: {
-    settings: 'Settings',
-    general: 'General',
-    autoConnect: 'Auto connect',
-    autoConnectSub: 'Connects by itself when the app opens.',
-    customDns: 'Custom DNS',
-    customDnsSub: 'Enter your own DNS addresses',
-    language: 'Language',
-    channelSec: 'Channel & requests',
-    request: 'Request a game or app',
-    channel: 'Telegram channel',
-    channelSub: 'News, new versions and support',
-    device: 'Device',
-    deviceId: 'Device ID',
-    deviceNote: 'Send this ID when reporting a problem. It is anonymous and never changes.',
-    about: 'About',
-    update: 'Check for updates',
-    updateSub: 'Get the latest version from the channel',
-    version: 'Version',
-    notConnected: 'Not connected',
-    tapConnect: 'Tap to connect',
-    scanning: 'Finding the best DNS...',
-    scanningSub: 'Testing server speed for the selected game',
-    connecting: 'Connecting...',
-    connected: 'Connected',
-    tapDisconnect: 'Tap to disconnect',
-    supported: 'Supported games & apps',
-    showAll: 'Show all',
-    showLess: 'Show less',
-    join: 'Join the Abrino DNS Telegram channel',
-    results: 'Test results for',
-    bestDns: 'Best DNS',
-    custom: 'Custom',
-    customTitle: 'Custom DNS',
-    presets: 'Servers',
-    v4: 'DNS · IPv4',
-    v6: 'DNS · IPv6',
-    pingTest: 'Ping test',
-    connectCustom: 'Connect with this DNS',
-    pingResult: 'Ping result',
-    noModule: 'Native module not found. Install this app as an APK.',
-    noServer: 'No server answered. Check your internet.',
-    noValid: 'Enter at least one valid DNS address.',
-    denied: 'VPN permission was denied.',
-    failed: 'Could not connect. Try again.',
-    footer: 'Only DNS requests pass through the VPN; game traffic goes directly and is not slowed down.',
-    pingNote: 'Ping here means DNS answer speed, not in-game ping.',
-  },
-};
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
-/* ------------------------------------------------------------------ */
-const isV4 = (x) => /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(x);
-const isV6 = (x) =>
-  x.includes(':') &&
-  /^[0-9a-fA-F:.]+$/.test(x) &&
-  (x.match(/::/g) || []).length <= 1 &&
-  x.split(':').length >= 3 &&
-  x.split(':').length <= 8;
-
-const toFa = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
-const pingColor = (ms) => (ms < 0 ? C.bad : ms < 50 ? C.green : ms < 120 ? C.warn : '#FF7A00');
-
-const hex2rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
-const mix = (a, b, t) => {
-  const A = hex2rgb(a);
-  const B = hex2rgb(b);
-  const c = A.map((v, i) => Math.round(v + (B[i] - v) * t));
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
-};
-
-const makeId = () => {
-  const ch = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const part = (n) => Array.from({ length: n }, () => ch[Math.floor(Math.random() * ch.length)]).join('');
-  return `AB-${part(5)}-${part(5)}-${part(5)}-${part(5)}`;
-};
-
-const openChannel = () => {
-  Linking.openURL(CHANNEL_URL).catch(() => {});
-};
-
-// one DNS lookup time (ms) or -1
-const q = async (host, domain) => {
-  if (!DnsVpn) return -1;
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   try {
-    if (DnsVpn.pingDomain) return await DnsVpn.pingDomain(host, domain);
-    return await DnsVpn.ping(host);
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  } catch (e) {}
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const IPV4 =
+  /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+const DOMAIN_RE =
+  /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/;
+
+function normalizeDomain(input) {
+  let d = String(input || '').trim().toLowerCase();
+  d = d.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
+  d = d.split(/[/?#]/)[0];
+  d = d.replace(/:\d+$/, '');
+  d = d.replace(/\.$/, '');
+  return d;
+}
+
+function buildDnsList(dnsId, primary, secondary) {
+  if (dnsId === 'custom') {
+    const a = String(primary || '').trim();
+    const b = String(secondary || '').trim();
+    if (!IPV4.test(a)) return { error: 'DNS اصلی نامعتبر است (فقط IPv4)' };
+    if (b && !IPV4.test(b)) return { error: 'DNS دوم نامعتبر است (فقط IPv4)' };
+    return { list: b ? [a, b] : [a] };
+  }
+  const p = PRESETS.find((x) => x.id === dnsId) || PRESETS[0];
+  return { list: p.servers };
+}
+
+async function tryFetch(url, ms) {
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = setTimeout(() => {
+    if (ctrl) ctrl.abort();
+  }, ms);
+  try {
+    await fetch(url, { method: 'GET', signal: ctrl ? ctrl.signal : undefined });
+    return true; // هر پاسخی (حتی 403/404) یعنی دامنه در دسترس است
   } catch (e) {
-    return -1;
+    return false;
+  } finally {
+    clearTimeout(timer);
   }
-};
+}
 
-// Score of one DNS for a list of domains (lower is better, -1 = dead)
-const scoreDns = async (cand, domains) => {
-  const host = cand.v4[0];
-  const vals = [];
-  let failed = 0;
-  for (const d of domains) {
-    const a = await q(host, d);
-    if (a < 0) { failed += 1; continue; }
-    const b = await q(host, d);
-    vals.push(a);
-    if (b >= 0) vals.push(b);
+async function checkDomain(domain) {
+  if (await tryFetch('https://' + domain + '/', 6000)) return true;
+  return tryFetch('http://' + domain + '/', 4000);
+}
+
+async function readPrefs() {
+  try {
+    if (!DnsVpn || !DnsVpn.loadPrefs) return {};
+    const raw = await DnsVpn.loadPrefs();
+    if (!raw) return {};
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : {};
+  } catch (e) {
+    return {};
   }
-  if (!vals.length) return -1;
-  const avg = vals.reduce((x, y) => x + y, 0) / vals.length;
-  return avg + failed * 100;
-};
+}
 
-const scanGame = async (game) => {
-  let res = await Promise.all(DNS_LIST.map(async (c) => ({ c, ms: await scoreDns(c, game.domains) })));
-  if (!res.some((r) => r.ms >= 0)) {
-    // the game's names did not resolve anywhere: fall back to a generic name
-    res = await Promise.all(DNS_LIST.map(async (c) => ({ c, ms: await scoreDns(c, ['google.com']) })));
+async function waitForRunning(target, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    try {
+      if (!!(await DnsVpn.isRunning()) === target) return true;
+    } catch (e) {}
+    await sleep(250);
   }
-  return res.filter((r) => r.ms >= 0).sort((x, y) => x.ms - y.ms);
-};
+  return false;
+}
 
-/* ------------------------------------------------------------------ */
-/*  Small visual pieces                                                */
-/* ------------------------------------------------------------------ */
-const NET_DOTS = [
-  ['12%', '8%', 5, 0.5], ['30%', '14%', 4, 0.35], ['62%', '6%', 7, 0.6], ['86%', '12%', 4, 0.4],
-  ['8%', '28%', 4, 0.3], ['92%', '30%', 6, 0.5], ['20%', '46%', 4, 0.3], ['80%', '48%', 5, 0.35],
-  ['50%', '60%', 4, 0.25], ['14%', '70%', 5, 0.3], ['90%', '74%', 4, 0.3],
-];
+// ─────────────────────────── اجزای کوچک ───────────────────────────
 
-function Background() {
+function Reveal({ v, children }) {
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View style={[s.glow, { width: 520, height: 520, borderRadius: 260, top: 40, alignSelf: 'center', backgroundColor: 'rgba(0,120,255,0.05)' }]} />
-      <View style={[s.glow, { width: 360, height: 360, borderRadius: 180, top: 120, alignSelf: 'center', backgroundColor: 'rgba(90,40,255,0.07)' }]} />
-      <View style={[s.glow, { width: 460, height: 460, borderRadius: 230, bottom: 40, alignSelf: 'center', backgroundColor: 'rgba(120,30,200,0.06)' }]} />
-      {NET_DOTS.map((d, i) => (
-        <View
-          key={i}
-          style={{ position: 'absolute', left: d[0], top: d[1], width: d[2], height: d[2], borderRadius: d[2], backgroundColor: C.blue, opacity: d[3] }}
-        />
-      ))}
+    <Animated.View
+      style={{
+        opacity: v,
+        transform: [
+          { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) },
+        ],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+function PowerIcon({ color }) {
+  return (
+    <View style={styles.powerBox}>
+      <View style={[styles.powerRing, { borderColor: color }]} />
+      <View style={styles.powerGap} />
+      <View style={[styles.powerBar, { backgroundColor: color }]} />
     </View>
   );
 }
 
-function Logo() {
+function CheckBadge({ state }) {
+  if (!state) return null;
+  const map = {
+    testing: { t: '…', c: C.lime },
+    ok: { t: '✓', c: C.neon },
+    fail: { t: '✕', c: C.danger },
+  };
+  const m = map[state];
   return (
-    <View style={s.logoWrap}>
-      <View style={s.logoBox}>
-        <Text style={s.logoLetter}>A</Text>
-        <View style={s.logoBar} />
-      </View>
-      <Text style={s.logoText}>
-        Abrino<Text style={{ color: C.blue }}> DNS</Text>
-      </Text>
+    <View style={[styles.badge, { borderColor: m.c }]}>
+      <Text style={[styles.badgeTxt, { color: m.c }]}>{m.t}</Text>
     </View>
   );
 }
 
-const RING_N = 100;
-const RING_SIZE = 262;
-const RING_R = 122;
-const DOT = 9;
-
-function PowerButton({ on, stage, pulse, onPress }) {
-  const busy = stage !== 'idle';
-  const A = on ? C.green : C.blue;
-  const B = on ? C.blue : C.purple;
-
-  const dots = useMemo(() => {
-    const out = [];
-    for (let i = 0; i < RING_N; i += 1) {
-      const th = (i / RING_N) * Math.PI * 2;
-      const t = (1 + Math.cos(th + Math.PI / 4)) / 2; // blue top-right, purple bottom-left
-      out.push({
-        key: i,
-        left: RING_SIZE / 2 + RING_R * Math.cos(th) - DOT / 2,
-        top: RING_SIZE / 2 + RING_R * Math.sin(th) - DOT / 2,
-        color: mix(B, A, t),
-      });
-    }
-    return out;
-  }, [A, B]);
-
-  const halo = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.28] });
-  const scale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1.05] });
-
+function MiniButton({ label, onPress, color, disabled }) {
   return (
-    <View style={s.hero}>
-      <Animated.View
-        pointerEvents="none"
-        style={[s.halo, { backgroundColor: A, opacity: halo, transform: [{ scale }] }]}
-      />
-      <View style={s.ringBox} pointerEvents="none">
-        {dots.map((d) => (
-          <View key={d.key} style={{ position: 'absolute', left: d.left, top: d.top, width: DOT, height: DOT, borderRadius: DOT, backgroundColor: d.color }} />
-        ))}
-      </View>
-      <View style={s.thinRing} pointerEvents="none" />
-      <TouchableOpacity activeOpacity={0.85} onPress={onPress} disabled={busy} style={s.disc}>
-        {busy ? (
-          <ActivityIndicator size="large" color={C.blue} />
-        ) : (
-          <View style={s.pwr}>
-            <View style={[s.pwrRing, { borderColor: on ? C.green : '#FFFFFF' }]} />
-            <View style={s.pwrGap} />
-            <View style={[s.pwrBar, { backgroundColor: on ? C.green : '#FFFFFF' }]} />
-          </View>
-        )}
-      </TouchableOpacity>
-    </View>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      android_ripple={{ color: 'rgba(57,255,20,0.2)' }}
+      style={({ pressed }) => [
+        styles.mini,
+        { borderColor: color || C.neonDim, opacity: disabled ? 0.45 : pressed ? 0.7 : 1 },
+      ]}
+    >
+      <Text style={[styles.miniTxt, { color: color || C.neon }]}>{label}</Text>
+    </Pressable>
   );
 }
 
-function Row({ fa, icon, title, sub, onPress, right, last }) {
-  const dir = fa ? 'row-reverse' : 'row';
-  const ta = fa ? 'right' : 'left';
-  const inner = (
-    <View>
-      <View style={[s.row, { flexDirection: dir }]}>
-        <View style={s.iconBox}>
-          <Text style={s.iconTxt}>{icon}</Text>
-        </View>
-        <View style={{ flex: 1, marginHorizontal: 14 }}>
-          <Text style={[s.rowTitle, { textAlign: ta }]}>{title}</Text>
-          {!!sub && <Text style={[s.rowSub, { textAlign: ta }]}>{sub}</Text>}
-        </View>
-        {right !== undefined ? right : onPress ? <Text style={s.chev}>{fa ? '‹' : '›'}</Text> : null}
-      </View>
-      {!last && <View style={[s.sep, fa ? { marginRight: 74, marginLeft: 0 } : { marginLeft: 74, marginRight: 0 }]} />}
-    </View>
-  );
-  if (!onPress) return inner;
-  return (
-    <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
-      {inner}
-    </TouchableOpacity>
-  );
-}
+// ─────────────────────────── برنامه ───────────────────────────
 
-function Header({ fa, title, onBack }) {
-  return (
-    <View style={s.header}>
-      <Text style={s.headerTitle}>{title}</Text>
-      <TouchableOpacity onPress={onBack} style={[s.backBtn, fa ? { right: 4 } : { left: 4 }]} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-        <Text style={s.backTxt}>{fa ? '›' : '‹'}</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-function Field({ label, value, onChangeText, placeholder, valid }) {
-  const bad = value.length > 0 && !valid;
-  return (
-    <View style={{ marginTop: 10 }}>
-      <Text style={s.fieldLabel}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor="#3C3F66"
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="visible-password"
-        style={[s.input, bad && { borderColor: C.bad }]}
-      />
-    </View>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  App                                                                */
-/* ------------------------------------------------------------------ */
 export default function App() {
-  const [screen, setScreen] = useState('home'); // home | settings | custom
-  const [lang, setLang] = useState('fa');
-  const [autoConnect, setAutoConnect] = useState(false);
-  const [deviceId, setDeviceId] = useState('');
-  const [gameId, setGameId] = useState('pubg');
-  const [mode, setMode] = useState('auto'); // auto | custom
-  const [showAll, setShowAll] = useState(false);
+  // وضعیت اتصال
+  const [status, setStatus] = useState('idle'); // idle | connecting | connected | failed | disconnecting
+  const [message, setMessage] = useState('برای اتصال، دکمه را لمس کنید');
+  const [activeDns, setActiveDns] = useState([]);
 
-  const [v4a, setV4a] = useState('8.8.8.8');
-  const [v4b, setV4b] = useState('8.8.4.4');
-  const [v6a, setV6a] = useState('2001:4860:4860::8888');
-  const [v6b, setV6b] = useState('2001:4860:4860::8844');
-  const [useV6, setUseV6] = useState(true);
-  const [preset, setPreset] = useState('google');
+  // تنظیمات DNS
+  const [dnsId, setDnsId] = useState('google');
+  const [customPrimary, setCustomPrimary] = useState('');
+  const [customSecondary, setCustomSecondary] = useState('');
 
-  const [on, setOn] = useState(false);
-  const [stage, setStage] = useState('idle'); // idle | scan | connect
-  const [msg, setMsg] = useState('');
-  const [active, setActive] = useState(null); // { name, ms, game }
-  const [results, setResults] = useState([]); // [{ name, ms }]
-  const [resultsGame, setResultsGame] = useState('');
-  const [pings, setPings] = useState([]);
+  // برنامه‌های سفارشی
+  const [apps, setApps] = useState([]);
+  const [newName, setNewName] = useState('');
+  const [newDomain, setNewDomain] = useState('');
+  const [formError, setFormError] = useState('');
+  const [checks, setChecks] = useState({});
+
   const [loaded, setLoaded] = useState(false);
 
-  const pulse = useRef(new Animated.Value(0)).current;
-  const autoDone = useRef(false);
+  const busyRef = useRef(false);
+  const statusRef = useRef('idle');
+  const rawPrefsRef = useRef({});
 
-  const t = T[lang];
-  const fa = lang === 'fa';
-  const ta = fa ? 'right' : 'left';
-  const game = GAMES.find((g) => g.id === gameId) || GAMES[0];
-  const busy = stage !== 'idle';
-
-  /* pulse animation */
   useEffect(() => {
-    const d = on ? 900 : 1700;
+    statusRef.current = status;
+  }, [status]);
+
+  // ── انیمیشن‌ها ──
+  const pulse = useRef(new Animated.Value(0)).current;
+  const spin = useRef(new Animated.Value(0)).current;
+  const intensity = useRef(new Animated.Value(0.35)).current;
+  const press = useRef(new Animated.Value(1)).current;
+  const msgAnim = useRef(new Animated.Value(1)).current;
+  const reveals = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    Animated.stagger(
+      90,
+      reveals.map((a) =>
+        Animated.timing(a, {
+          toValue: 1,
+          duration: 480,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        })
+      )
+    ).start();
+  }, [reveals]);
+
+  const active = status === 'connected' || status === 'connecting' || status === 'disconnecting';
+  const working = status === 'connecting' || status === 'disconnecting';
+
+  useEffect(() => {
+    pulse.setValue(0);
     const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: d, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: d, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ])
+      Animated.timing(pulse, {
+        toValue: 1,
+        duration: active ? 1900 : 3600,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    Animated.timing(intensity, {
+      toValue: active ? 1 : 0.35,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+    return () => loop.stop();
+  }, [active, pulse, intensity]);
+
+  useEffect(() => {
+    if (!working) return undefined;
+    spin.setValue(0);
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
     );
     loop.start();
     return () => loop.stop();
-  }, [on, pulse]);
+  }, [working, spin]);
 
-  /* load saved settings */
   useEffect(() => {
+    msgAnim.setValue(0);
+    Animated.timing(msgAnim, {
+      toValue: 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [message, status, msgAnim]);
+
+  const scaleA = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] });
+  const opA = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
+  const scaleB = pulse.interpolate({
+    inputRange: [0, 0.5, 0.5001, 1],
+    outputRange: [1.3, 1.6, 1, 1.3],
+  });
+  const opB = pulse.interpolate({
+    inputRange: [0, 0.5, 0.5001, 1],
+    outputRange: [0.25, 0, 0.5, 0.25],
+  });
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  const accent =
+    status === 'failed' ? C.danger : status === 'connecting' || status === 'disconnecting' ? C.lime : C.neon;
+
+  // ── بارگذاری و ذخیره ──
+  useEffect(() => {
+    let alive = true;
     (async () => {
-      let id = '';
-      try {
-        if (DnsVpn) {
-          const raw = await DnsVpn.loadPrefs();
-          if (raw) {
-            const p = JSON.parse(raw);
-            if (p.lang) setLang(p.lang);
-            if (typeof p.autoConnect === 'boolean') setAutoConnect(p.autoConnect);
-            if (p.gameId) setGameId(p.gameId);
-            if (p.mode) setMode(p.mode);
-            if (p.v4a !== undefined) setV4a(p.v4a);
-            if (p.v4b !== undefined) setV4b(p.v4b);
-            if (p.v6a !== undefined) setV6a(p.v6a);
-            if (p.v6b !== undefined) setV6b(p.v6b);
-            if (typeof p.useV6 === 'boolean') setUseV6(p.useV6);
-            if (p.preset) setPreset(p.preset);
-            if (p.deviceId) id = p.deviceId;
-            const running = await DnsVpn.isRunning();
-            setOn(running);
-            if (running && p.active) setActive(p.active);
-          }
+      const raw = await readPrefs();
+      rawPrefsRef.current = raw;
+      const s = raw.abrino;
+      if (alive && s && typeof s === 'object') {
+        if (s.dnsId === 'custom' || PRESETS.some((p) => p.id === s.dnsId)) setDnsId(s.dnsId);
+        if (typeof s.customPrimary === 'string') setCustomPrimary(s.customPrimary);
+        if (typeof s.customSecondary === 'string') setCustomSecondary(s.customSecondary);
+        if (Array.isArray(s.apps)) {
+          const clean = s.apps
+            .filter(
+              (a) =>
+                a &&
+                typeof a.id === 'string' &&
+                typeof a.name === 'string' &&
+                typeof a.domain === 'string'
+            )
+            .slice(0, MAX_APPS);
+          setApps(clean);
         }
-      } catch (e) {}
-      setDeviceId(id || makeId());
-      setLoaded(true);
+      }
+      if (alive) setLoaded(true);
     })();
-    const timer = setInterval(() => {
-      if (DnsVpn) DnsVpn.isRunning().then(setOn).catch(() => {});
-    }, 3000);
-    return () => clearInterval(timer);
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  /* save settings */
   useEffect(() => {
-    if (!loaded || !DnsVpn) return;
-    DnsVpn.savePrefs(
-      JSON.stringify({ lang, autoConnect, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId, active })
-    );
-  }, [loaded, lang, autoConnect, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId, active]);
-
-  /* Android back button */
-  useEffect(() => {
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (screen !== 'home') {
-        setScreen(screen === 'custom' ? 'settings' : 'home');
-        return true;
-      }
-      return false;
-    });
-    return () => sub.remove();
-  }, [screen]);
-
-  /* auto connect when the app opens */
-  const connectRef = useRef(null);
-  useEffect(() => {
-    if (loaded && autoConnect && !autoDone.current) {
-      autoDone.current = true;
-      if (!on && mode === 'auto' && connectRef.current) connectRef.current({ mode: 'auto', gameId });
-    }
-  }, [loaded]); // eslint-disable-line
-
-  /* ---------------- actions ---------------- */
-  const customList = () => {
-    const list = [v4a, v4b].filter(isV4);
-    if (useV6) list.push(...[v6a, v6b].filter(isV6));
-    return list;
-  };
-
-  const connect = async (opts) => {
-    const m = (opts && opts.mode) || mode;
-    const g = GAMES.find((x) => x.id === ((opts && opts.gameId) || gameId)) || GAMES[0];
-    if (!DnsVpn) { setMsg(t.noModule); return; }
-    setMsg('');
+    if (!loaded || !DnsVpn || !DnsVpn.savePrefs) return;
     try {
-      let list;
-      let info;
-      if (m === 'custom') {
-        list = customList();
-        if (!list.length) throw new Error(t.noValid);
-        info = { name: t.custom, ms: null, game: '' };
-      } else {
-        setStage('scan');
-        const res = await scanGame(g);
-        if (!res.length) throw new Error(t.noServer);
-        const best = res[0];
-        setResults(res.slice(0, 5).map((r) => ({ name: r.c.name, ms: r.ms })));
-        setResultsGame(g.name);
-        list = [...best.c.v4, ...(useV6 ? best.c.v6.filter(isV6) : [])];
-        info = { name: best.c.name, ms: Math.round(best.ms), game: g.name };
+      const next = {
+        ...rawPrefsRef.current,
+        abrino: { v: 1, dnsId, customPrimary, customSecondary, apps },
+      };
+      rawPrefsRef.current = next;
+      DnsVpn.savePrefs(JSON.stringify(next));
+    } catch (e) {}
+  }, [loaded, dnsId, customPrimary, customSecondary, apps]);
+
+  // ── همگام‌سازی وضعیت با سرویس واقعی ──
+  const syncState = useCallback(async () => {
+    if (!DnsVpn || !DnsVpn.isRunning) return;
+    try {
+      const running = !!(await DnsVpn.isRunning());
+      if (busyRef.current) return;
+      if (running && statusRef.current !== 'connected') {
+        setStatus('connected');
+        setMessage('اتصال فعال است');
+      } else if (!running && statusRef.current === 'connected') {
+        setStatus('idle');
+        setMessage('اتصال قطع شد');
       }
-      setStage('connect');
-      await DnsVpn.start(list);
-      await new Promise((r) => setTimeout(r, 800));
-      const running = await DnsVpn.isRunning();
-      setOn(running);
-      if (running) setActive(info);
-      else setMsg(t.failed);
-    } catch (e) {
-      setMsg(e && e.code === 'DENIED' ? t.denied : (e && e.message) || 'Error');
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => {
+    syncState();
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active') syncState();
+    });
+    const t = setInterval(syncState, 5000);
+    return () => {
+      sub.remove();
+      clearInterval(t);
+    };
+  }, [syncState]);
+
+  // ── اتصال / قطع ──
+  const connect = useCallback(async () => {
+    if (busyRef.current) return;
+    if (!DnsVpn || !DnsVpn.start) {
+      setStatus('failed');
+      setMessage('ماژول DNS/VPN در این نسخه موجود نیست');
+      return;
     }
-    setStage('idle');
+    const built = buildDnsList(dnsId, customPrimary, customSecondary);
+    if (built.error) {
+      setStatus('failed');
+      setMessage(built.error);
+      return;
+    }
+    busyRef.current = true;
+    setStatus('connecting');
+    setMessage('در حال برقراری اتصال…');
+    try {
+      await DnsVpn.start(built.list);
+      const ok = await waitForRunning(true, 4000);
+      if (ok) {
+        setActiveDns(built.list);
+        setStatus('connected');
+        setMessage('DNS با موفقیت فعال شد');
+      } else {
+        setStatus('failed');
+        setMessage('سرویس VPN راه‌اندازی نشد. دوباره تلاش کنید');
+      }
+    } catch (e) {
+      const code = e && e.code;
+      setStatus('failed');
+      setMessage(
+        code === 'DENIED'
+          ? 'مجوز VPN داده نشد. برای اتصال باید آن را تأیید کنید'
+          : code === 'NO_DNS'
+          ? 'آدرس DNS وارد نشده است'
+          : code === 'NO_ACTIVITY'
+          ? 'برنامه را باز نگه دارید و دوباره تلاش کنید'
+          : 'اتصال ناموفق بود'
+      );
+    } finally {
+      busyRef.current = false;
+    }
+  }, [dnsId, customPrimary, customSecondary]);
+
+  const disconnect = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setStatus('disconnecting');
+    setMessage('در حال قطع اتصال…');
+    try {
+      await DnsVpn.stop();
+      const stopped = await waitForRunning(false, 3000);
+      if (stopped) {
+        setStatus('idle');
+        setMessage('اتصال قطع شد');
+      } else {
+        setStatus('connected');
+        setMessage('قطع اتصال کامل نشد. دوباره تلاش کنید');
+      }
+    } catch (e) {
+      setStatus('connected');
+      setMessage('قطع اتصال ناموفق بود');
+    } finally {
+      busyRef.current = false;
+    }
+  }, []);
+
+  const onToggle = useCallback(() => {
+    if (busyRef.current) return;
+    if (statusRef.current === 'connected') disconnect();
+    else connect();
+  }, [connect, disconnect]);
+
+  const pressIn = () =>
+    Animated.spring(press, { toValue: 0.94, useNativeDriver: true, speed: 40, bounciness: 0 }).start();
+  const pressOut = () =>
+    Animated.spring(press, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }).start();
+
+  // ── تلگرام ──
+  const openTelegram = useCallback(async () => {
+    if (!TELEGRAM_USERNAME || TELEGRAM_USERNAME === 'YOUR_TELEGRAM_USERNAME') {
+      Alert.alert('تلگرام', 'نام کاربری تلگرام در ابتدای فایل App.js تنظیم نشده است.');
+      return;
+    }
+    try {
+      await Linking.openURL('https://t.me/' + TELEGRAM_USERNAME);
+    } catch (e) {
+      Alert.alert('تلگرام', 'باز کردن تلگرام ممکن نشد.');
+    }
+  }, []);
+
+  // ── تست دسترسی دامنه‌ها ──
+  const runCheck = useCallback(async (key, domain) => {
+    setChecks((c) => ({ ...c, [key]: 'testing' }));
+    const ok = await checkDomain(domain);
+    setChecks((c) => ({ ...c, [key]: ok ? 'ok' : 'fail' }));
+  }, []);
+
+  const runPubgAll = useCallback(() => {
+    PUBG_DOMAINS.forEach((d) => runCheck('pubg:' + d, d));
+  }, [runCheck]);
+
+  // ── افزودن / حذف برنامه ──
+  const addApp = useCallback(() => {
+    const name = newName.trim();
+    const domain = normalizeDomain(newDomain);
+    if (!name) return setFormError('نام برنامه را وارد کنید');
+    if (name.length > 24) return setFormError('نام برنامه حداکثر ۲۴ کاراکتر باشد');
+    if (!DOMAIN_RE.test(domain)) return setFormError('دامنه نامعتبر است، مثال: example.com');
+    if (apps.length >= MAX_APPS) return setFormError('حداکثر ' + MAX_APPS + ' برنامه قابل افزودن است');
+    if (apps.some((a) => a.domain === domain) || PUBG_DOMAINS.includes(domain))
+      return setFormError('این دامنه قبلاً اضافه شده است');
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setApps((prev) => [
+      ...prev,
+      { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, domain },
+    ]);
+    setNewName('');
+    setNewDomain('');
+    setFormError('');
+    Keyboard.dismiss();
+  }, [newName, newDomain, apps]);
+
+  const removeApp = useCallback((item) => {
+    Alert.alert('حذف برنامه', '«' + item.name + '» حذف شود؟', [
+      { text: 'انصراف', style: 'cancel' },
+      {
+        text: 'حذف',
+        style: 'destructive',
+        onPress: () => {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          setApps((prev) => prev.filter((a) => a.id !== item.id));
+          setChecks((c) => {
+            const n = { ...c };
+            delete n['app:' + item.id];
+            return n;
+          });
+        },
+      },
+    ]);
+  }, []);
+
+  const selectDns = useCallback((id) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setDnsId(id);
+  }, []);
+
+  const locked = status === 'connected' || working;
+  const titleMap = {
+    idle: 'قطع',
+    connecting: 'در حال اتصال',
+    connected: 'متصل',
+    failed: 'ناموفق',
+    disconnecting: 'در حال قطع',
   };
-  connectRef.current = connect;
 
-  const disconnect = async () => {
-    if (!DnsVpn) return;
-    setStage('connect');
-    try { await DnsVpn.stop(); } catch (e) {}
-    setOn(false);
-    setActive(null);
-    setStage('idle');
-  };
+  const dnsPreview = useMemo(() => {
+    if (status === 'connected' && activeDns.length) return activeDns.join('  •  ');
+    const b = buildDnsList(dnsId, customPrimary, customSecondary);
+    return b.list ? b.list.join('  •  ') : '';
+  }, [status, activeDns, dnsId, customPrimary, customSecondary]);
 
-  const onPower = () => {
-    if (busy) return;
-    if (on) disconnect();
-    else connect({ mode, gameId });
-  };
-
-  const pickGame = (id) => {
-    if (busy) return;
-    setGameId(id);
-    setMode('auto');
-    if (on) connect({ mode: 'auto', gameId: id });
-  };
-
-  const edit = (setter) => (v) => { setter(v.trim()); setPreset('custom'); };
-  const applyPreset = (p) => {
-    setPreset(p.id);
-    setV4a(p.v4[0] || ''); setV4b(p.v4[1] || '');
-    setV6a(p.v6[0] || ''); setV6b(p.v6[1] || '');
-  };
-
-  const pingAll = async () => {
-    if (!DnsVpn || busy) return;
-    setStage('scan'); setPings([]);
-    const list = [v4a, v4b, ...(useV6 ? [v6a, v6b] : [])].filter((a) => isV4(a) || isV6(a));
-    const res = await Promise.all(list.map(async (a) => ({ a, ms: await DnsVpn.ping(a) })));
-    setPings(res);
-    setStage('idle');
-  };
-
-  const topPad = (Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 44) + 10;
-
-  /* ---------------- HOME ---------------- */
-  const renderHome = () => {
-    const title = stage === 'scan' ? t.scanning : stage === 'connect' ? t.connecting : on ? t.connected : t.notConnected;
-    const sub = stage === 'scan' ? t.scanningSub : on ? (active ? `${active.name}${active.ms != null ? ` · ${active.ms}ms` : ''}${active.game ? ` · ${active.game}` : ''}` : t.tapDisconnect) : t.tapConnect;
-    const shown = showAll ? GAMES : GAMES.slice(0, 3);
-    const more = GAMES.length - 3;
-    const maxMs = results.length ? Math.max(...results.map((r) => r.ms), 60) : 60;
-
-    return (
-      <ScrollView contentContainerStyle={[s.scroll, { paddingTop: topPad }]} showsVerticalScrollIndicator={false}>
-        <View style={[s.topbar, { flexDirection: fa ? 'row' : 'row-reverse' }]}>
-          <TouchableOpacity style={s.gear} onPress={() => setScreen('settings')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={s.gearTxt}>⚙</Text>
-          </TouchableOpacity>
-          <Logo />
-        </View>
-
-        <PowerButton on={on} stage={stage} pulse={pulse} onPress={onPower} />
-
-        <Text style={[s.status, on && { color: C.green }]}>{title}</Text>
-        <Text style={s.statusSub} numberOfLines={2}>{sub}</Text>
-        {!!msg && (
-          <View style={s.msgBox}>
-            <Text style={s.msgTxt}>{msg}</Text>
-          </View>
-        )}
-
-        {results.length > 0 && mode === 'auto' && (
-          <View style={[s.card, { padding: 14, marginTop: 18 }]}>
-            <Text style={[s.cardHead, { textAlign: ta }]}>{`${t.results} ${resultsGame}`}</Text>
-            {results.map((r, i) => (
-              <View key={r.name} style={{ marginTop: 10 }}>
-                <View style={[s.resTop, { flexDirection: fa ? 'row-reverse' : 'row' }]}>
-                  <Text style={[s.resName, i === 0 && { color: C.green }]}>{i === 0 ? `★ ${r.name}` : r.name}</Text>
-                  <Text style={[s.resMs, { color: pingColor(r.ms) }]}>{`${Math.round(r.ms)} ms`}</Text>
-                </View>
-                <View style={s.barBg}>
-                  <View style={[s.barFill, { width: `${Math.max(8, Math.min(100, (r.ms / maxMs) * 100))}%`, backgroundColor: pingColor(r.ms) }]} />
-                </View>
-              </View>
-            ))}
-            <Text style={[s.note, { textAlign: ta }]}>{t.pingNote}</Text>
-          </View>
-        )}
-
-        <View style={[s.card, { marginTop: 22, padding: 16 }]}>
-          <Text style={[s.cardHead, { textAlign: ta, marginBottom: 6 }]}>{t.supported}</Text>
-          {shown.map((g) => {
-            const sel = mode === 'auto' && g.id === gameId;
-            return (
-              <TouchableOpacity key={g.id} activeOpacity={0.75} onPress={() => pickGame(g.id)} style={[s.gameRow, { flexDirection: fa ? 'row-reverse' : 'row' }, sel && s.gameSel]}>
-                <View style={s.iconBox}><Text style={s.iconTxt}>🎮</Text></View>
-                <Text style={[s.gameName, { textAlign: fa ? 'right' : 'left' }]} numberOfLines={1}>{g.name}</Text>
-                {sel ? <Text style={s.check}>✓</Text> : <View style={{ width: 20 }} />}
-              </TouchableOpacity>
-            );
-          })}
-          <TouchableOpacity onPress={() => setShowAll(!showAll)} style={s.moreBtn}>
-            <Text style={s.moreTxt}>{showAll ? `${t.showLess} ⌃` : `${t.showAll} (${fa ? toFa(more) : more}) ⌄`}</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity activeOpacity={0.8} onPress={openChannel} style={[s.joinBtn, { flexDirection: fa ? 'row-reverse' : 'row' }]}>
-          <Text style={s.plane}>➤</Text>
-          <Text style={[s.joinTxt, { textAlign: ta }]}>{t.join}</Text>
-          <Text style={s.chev}>{fa ? '‹' : '›'}</Text>
-        </TouchableOpacity>
-
-        <Text style={[s.footer, { textAlign: ta }]}>{t.footer}</Text>
-      </ScrollView>
-    );
-  };
-
-  /* ---------------- SETTINGS ---------------- */
-  const renderSettings = () => (
-    <ScrollView contentContainerStyle={[s.scroll, { paddingTop: topPad }]} showsVerticalScrollIndicator={false}>
-      <Header fa={fa} title={t.settings} onBack={() => setScreen('home')} />
-
-      <Text style={[s.secTitle, { textAlign: ta }]}>{t.general}</Text>
-      <View style={s.card}>
-        <Row
-          fa={fa}
-          icon="⚡"
-          title={t.autoConnect}
-          sub={t.autoConnectSub}
-          right={<Switch value={autoConnect} onValueChange={setAutoConnect} trackColor={{ false: '#2A2850', true: '#2F4BFF' }} thumbColor="#FFFFFF" />}
-        />
-        <Row fa={fa} icon="🌐" title={t.customDns} sub={t.customDnsSub} onPress={() => setScreen('custom')} last />
-      </View>
-
-      <Text style={[s.secTitle, { textAlign: ta }]}>{t.language}</Text>
-      <View style={[s.card, { padding: 8 }]}>
-        <View style={[s.seg, { flexDirection: fa ? 'row-reverse' : 'row' }]}>
-          <TouchableOpacity style={[s.segBtn, lang === 'fa' && s.segOn]} onPress={() => setLang('fa')}>
-            <Text style={[s.segTxt, lang === 'fa' && { color: '#fff' }]}>فارسی</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.segBtn, lang === 'en' && s.segOn]} onPress={() => setLang('en')}>
-            <Text style={[s.segTxt, lang === 'en' && { color: '#fff' }]}>English</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <Text style={[s.secTitle, { textAlign: ta }]}>{t.channelSec}</Text>
-      <View style={s.card}>
-        <Row fa={fa} icon="🎮" title={t.request} onPress={openChannel} />
-        <Row fa={fa} icon="✈" title={t.channel} sub={t.channelSub} onPress={openChannel} last />
-      </View>
-
-      <Text style={[s.secTitle, { textAlign: ta }]}>{t.device}</Text>
-      <View style={s.card}>
-        <Row
-          fa={fa}
-          icon="📱"
-          title={t.deviceId}
-          sub={deviceId}
-          onPress={() => Share.share({ message: deviceId }).catch(() => {})}
-          right={<Text style={s.chev}>⧉</Text>}
-          last
-        />
-      </View>
-      <Text style={[s.note, { textAlign: ta, marginTop: 8 }]}>{t.deviceNote}</Text>
-
-      <Text style={[s.secTitle, { textAlign: ta }]}>{t.about}</Text>
-      <View style={s.card}>
-        <Row fa={fa} icon="✨" title={t.update} sub={t.updateSub} onPress={openChannel} />
-        <Row
-          fa={fa}
-          icon="ℹ"
-          title={`Abrino DNS`}
-          sub={`${t.version} ${fa ? toFa(VERSION) : VERSION}`}
-          last
-        />
-      </View>
-    </ScrollView>
-  );
-
-  /* ---------------- CUSTOM DNS ---------------- */
-  const renderCustom = () => (
-    <ScrollView contentContainerStyle={[s.scroll, { paddingTop: topPad }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-      <Header fa={fa} title={t.customTitle} onBack={() => setScreen('settings')} />
-
-      <Text style={[s.secTitle, { textAlign: ta }]}>{t.presets}</Text>
-      <View style={[s.chips, { justifyContent: fa ? 'flex-end' : 'flex-start' }]}>
-        {DNS_LIST.map((p) => {
-          const sel = preset === p.id;
-          return (
-            <TouchableOpacity key={p.id} activeOpacity={0.8} onPress={() => applyPreset(p)} style={[s.chip, sel && s.chipOn]}>
-              <Text style={[s.chipTxt, sel && { color: '#fff' }]}>{p.name}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <View style={[s.card, { padding: 16, marginTop: 18 }]}>
-        <Text style={[s.cardHead, { textAlign: ta }]}>{t.v4}</Text>
-        <View style={{ flexDirection: 'row' }}>
-          <View style={{ flex: 1 }}><Field label="DNS 1" value={v4a} onChangeText={edit(setV4a)} placeholder="8.8.8.8" valid={isV4(v4a)} /></View>
-          <View style={{ width: 10 }} />
-          <View style={{ flex: 1 }}><Field label="DNS 2" value={v4b} onChangeText={edit(setV4b)} placeholder="8.8.4.4" valid={isV4(v4b)} /></View>
-        </View>
-      </View>
-
-      <View style={[s.card, { padding: 16, marginTop: 14 }]}>
-        <View style={[s.resTop, { flexDirection: fa ? 'row-reverse' : 'row' }]}>
-          <Text style={[s.cardHead, { marginBottom: 0 }]}>{t.v6}</Text>
-          <Switch value={useV6} onValueChange={setUseV6} trackColor={{ false: '#2A2850', true: '#2F4BFF' }} thumbColor="#FFFFFF" />
-        </View>
-        <View style={{ opacity: useV6 ? 1 : 0.3 }} pointerEvents={useV6 ? 'auto' : 'none'}>
-          <Field label="DNS 1" value={v6a} onChangeText={edit(setV6a)} placeholder="2001:4860:4860::8888" valid={isV6(v6a)} />
-          <Field label="DNS 2" value={v6b} onChangeText={edit(setV6b)} placeholder="2001:4860:4860::8844" valid={isV6(v6b)} />
-        </View>
-      </View>
-
-      <View style={{ flexDirection: 'row', marginTop: 16 }}>
-        <TouchableOpacity disabled={busy} activeOpacity={0.8} onPress={pingAll} style={[s.btn, { flex: 1, marginRight: 10, opacity: busy ? 0.5 : 1 }]}>
-          <Text style={s.btnTxt}>{t.pingTest}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          disabled={busy}
-          activeOpacity={0.8}
-          onPress={() => { setMode('custom'); setScreen('home'); connect({ mode: 'custom' }); }}
-          style={[s.btn, s.btnOn, { flex: 1, opacity: busy ? 0.5 : 1 }]}
-        >
-          <Text style={[s.btnTxt, { color: '#fff' }]}>{t.connectCustom}</Text>
-        </TouchableOpacity>
-      </View>
-
-      {pings.length > 0 && (
-        <View style={[s.card, { padding: 16, marginTop: 16 }]}>
-          <Text style={[s.cardHead, { textAlign: ta }]}>{t.pingResult}</Text>
-          {pings.map((r) => (
-            <View key={r.a} style={{ marginTop: 10 }}>
-              <View style={s.resTop}>
-                <Text style={s.resName} numberOfLines={1}>{r.a}</Text>
-                <Text style={[s.resMs, { color: pingColor(r.ms) }]}>{r.ms < 0 ? 'timeout' : `${Math.round(r.ms)} ms`}</Text>
-              </View>
-              <View style={s.barBg}>
-                <View style={[s.barFill, { width: `${r.ms < 0 ? 100 : Math.max(8, Math.min(100, (r.ms / 200) * 100))}%`, backgroundColor: pingColor(r.ms) }]} />
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-    </ScrollView>
-  );
+  const pubgOk = PUBG_DOMAINS.filter((d) => checks['pubg:' + d] === 'ok').length;
+  const pubgDone = PUBG_DOMAINS.every((d) => checks['pubg:' + d] === 'ok' || checks['pubg:' + d] === 'fail');
 
   return (
-    <View style={s.root}>
-      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
-      <Background />
-      {screen === 'home' && renderHome()}
-      {screen === 'settings' && renderSettings()}
-      {screen === 'custom' && renderCustom()}
+    <View style={styles.root}>
+      <StatusBar barStyle="light-content" />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── هدر / لوگو ── */}
+          <Reveal v={reveals[0]}>
+            <Pressable
+              onPress={openTelegram}
+              android_ripple={{ color: 'rgba(57,255,20,0.15)', borderless: false }}
+              style={styles.header}
+            >
+              <View style={styles.logoMark}>
+                <Text style={styles.logoMarkTxt}>A</Text>
+              </View>
+              <View style={styles.headerTxt}>
+                <Text style={styles.brand}>
+                  Abrino<Text style={styles.brandAccent}>DNS</Text>
+                </Text>
+                <Text style={styles.tag}>کانال تلگرام را باز کنید</Text>
+              </View>
+              <View style={styles.tgPill}>
+                <Text style={styles.tgPillTxt}>Telegram</Text>
+              </View>
+            </Pressable>
+          </Reveal>
+
+          {!DnsVpn && (
+            <View style={styles.warn}>
+              <Text style={styles.warnTxt}>
+                ماژول DnsVpn در این بیلد پیدا نشد؛ اتصال فقط در APK ساخته‌شده با فایل‌های بومی پروژه کار می‌کند.
+              </Text>
+            </View>
+          )}
+
+          {/* ── دکمه اتصال ── */}
+          <Reveal v={reveals[1]}>
+            <View style={styles.hero}>
+              <View style={styles.btnWrap}>
+                <Animated.View style={[styles.ringLayer, { opacity: intensity }]} pointerEvents="none">
+                  <View style={[styles.halo, { backgroundColor: accent }]} />
+                  <Animated.View
+                    style={[styles.ring, { borderColor: accent, opacity: opA, transform: [{ scale: scaleA }] }]}
+                  />
+                  <Animated.View
+                    style={[styles.ring, { borderColor: accent, opacity: opB, transform: [{ scale: scaleB }] }]}
+                  />
+                </Animated.View>
+
+                <Pressable
+                  onPress={onToggle}
+                  onPressIn={pressIn}
+                  onPressOut={pressOut}
+                  disabled={working}
+                  accessibilityRole="button"
+                  accessibilityLabel={status === 'connected' ? 'قطع اتصال' : 'اتصال'}
+                >
+                  <Animated.View
+                    style={[
+                      styles.btn,
+                      {
+                        borderColor: accent,
+                        shadowColor: accent,
+                        transform: [{ scale: press }],
+                      },
+                    ]}
+                  >
+                    {working && (
+                      <Animated.View
+                        style={[styles.spinner, { borderTopColor: accent, transform: [{ rotate: rotate }] }]}
+                      />
+                    )}
+                    <PowerIcon color={accent} />
+                  </Animated.View>
+                </Pressable>
+              </View>
+
+              <Text style={[styles.stateTitle, { color: accent }]}>{titleMap[status]}</Text>
+              <Animated.View
+                style={[
+                  styles.msgRow,
+                  {
+                    opacity: msgAnim,
+                    transform: [
+                      { translateY: msgAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) },
+                    ],
+                  },
+                ]}
+              >
+                {(status === 'connected' || status === 'failed') && (
+                  <View style={[styles.resultDot, { backgroundColor: accent }]}>
+                    <Text style={styles.resultDotTxt}>{status === 'connected' ? '✓' : '✕'}</Text>
+                  </View>
+                )}
+                <Text style={styles.msg}>{message}</Text>
+              </Animated.View>
+              {!!dnsPreview && <Text style={styles.dnsLine}>{dnsPreview}</Text>}
+            </View>
+          </Reveal>
+
+          {/* ── انتخاب DNS ── */}
+          <Reveal v={reveals[2]}>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>سرور DNS</Text>
+              <View style={[styles.chips, locked && styles.dim]} pointerEvents={locked ? 'none' : 'auto'}>
+                {PRESETS.concat([{ id: 'custom', name: 'دلخواه' }]).map((p) => {
+                  const sel = dnsId === p.id;
+                  return (
+                    <Pressable
+                      key={p.id}
+                      onPress={() => selectDns(p.id)}
+                      style={[styles.chip, sel && styles.chipSel]}
+                    >
+                      <Text style={[styles.chipTxt, sel && styles.chipTxtSel]}>{p.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {dnsId === 'custom' && (
+                <View style={[styles.customBox, locked && styles.dim]}>
+                  <TextInput
+                    value={customPrimary}
+                    onChangeText={setCustomPrimary}
+                    editable={!locked}
+                    placeholder="DNS اصلی  مثال: 8.8.8.8"
+                    placeholderTextColor={C.muted}
+                    keyboardType="numbers-and-punctuation"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={styles.input}
+                  />
+                  <TextInput
+                    value={customSecondary}
+                    onChangeText={setCustomSecondary}
+                    editable={!locked}
+                    placeholder="DNS دوم (اختیاری)"
+                    placeholderTextColor={C.muted}
+                    keyboardType="numbers-and-punctuation"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={styles.input}
+                  />
+                </View>
+              )}
+              {locked && <Text style={styles.hint}>برای تغییر DNS ابتدا اتصال را قطع کنید</Text>}
+            </View>
+          </Reveal>
+
+          {/* ── PUBG + برنامه‌ها ── */}
+          <Reveal v={reveals[3]}>
+            <View style={[styles.card, styles.pubgCard]}>
+              <View style={styles.rowBetween}>
+                <MiniButton label="تست دامنه‌ها" onPress={runPubgAll} />
+                <View style={styles.pubgHead}>
+                  <Text style={styles.cardTitle}>PUBG Mobile</Text>
+                  <Text style={styles.pubgSub}>
+                    {pubgDone ? pubgOk + ' از ' + PUBG_DOMAINS.length + ' دامنه در دسترس' : 'بخش اختصاصی بازی'}
+                  </Text>
+                </View>
+              </View>
+              {PUBG_DOMAINS.map((d) => (
+                <View key={d} style={styles.row}>
+                  <CheckBadge state={checks['pubg:' + d]} />
+                  <Text style={styles.domain}>{d}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>برنامه‌های من</Text>
+
+              <TextInput
+                value={newName}
+                onChangeText={(t) => {
+                  setNewName(t);
+                  if (formError) setFormError('');
+                }}
+                placeholder="نام برنامه"
+                placeholderTextColor={C.muted}
+                maxLength={24}
+                style={styles.input}
+              />
+              <TextInput
+                value={newDomain}
+                onChangeText={(t) => {
+                  setNewDomain(t);
+                  if (formError) setFormError('');
+                }}
+                placeholder="دامنه  مثال: example.com"
+                placeholderTextColor={C.muted}
+                keyboardType="url"
+                autoCapitalize="none"
+                autoCorrect={false}
+                onSubmitEditing={addApp}
+                style={[styles.input, styles.inputLtr]}
+              />
+              {!!formError && <Text style={styles.error}>{formError}</Text>}
+              <Pressable
+                onPress={addApp}
+                android_ripple={{ color: 'rgba(0,0,0,0.2)' }}
+                style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.85 }]}
+              >
+                <Text style={styles.addBtnTxt}>افزودن برنامه</Text>
+              </Pressable>
+
+              {apps.length === 0 ? (
+                <Text style={styles.empty}>هنوز برنامه‌ای اضافه نکرده‌اید. نام و دامنه را وارد کنید.</Text>
+              ) : (
+                apps.map((a) => (
+                  <View key={a.id} style={styles.appRow}>
+                    <View style={styles.appActions}>
+                      <CheckBadge state={checks['app:' + a.id]} />
+                      <MiniButton label="تست" onPress={() => runCheck('app:' + a.id, a.domain)} />
+                      <MiniButton label="حذف" color={C.danger} onPress={() => removeApp(a)} />
+                    </View>
+                    <View style={styles.appInfo}>
+                      <Text style={styles.appName} numberOfLines={1}>
+                        {a.name}
+                      </Text>
+                      <Text style={styles.domainSmall} numberOfLines={1}>
+                        {a.domain}
+                      </Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+          </Reveal>
+
+          <Text style={styles.footer}>AbrinoDNS</Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Styles                                                             */
-/* ------------------------------------------------------------------ */
-// Persian text: extra line height so letters are never clipped, no letterSpacing.
-const s = StyleSheet.create({
+// ─────────────────────────── استایل‌ها ───────────────────────────
+
+const BTN = 168;
+
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
   root: { flex: 1, backgroundColor: C.bg },
-  scroll: { paddingHorizontal: 16, paddingBottom: 40 },
-  glow: { position: 'absolute' },
+  scroll: {
+    paddingTop: (StatusBar.currentHeight || 28) + 10,
+    paddingHorizontal: 16,
+    paddingBottom: 56,
+  },
 
-  /* top bar */
-  topbar: { alignItems: 'center', justifyContent: 'space-between', height: 54 },
-  gear: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  gearTxt: { color: C.mute, fontSize: 26, lineHeight: 32 },
-  logoWrap: { flexDirection: 'row', alignItems: 'center' },
-  logoBox: { width: 36, height: 36, borderRadius: 11, backgroundColor: '#1B2BFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#5E7BFF', overflow: 'hidden' },
-  logoLetter: { color: '#fff', fontSize: 22, fontWeight: '900', lineHeight: 26 },
-  logoBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 5, backgroundColor: C.purple },
-  logoText: { color: C.text, fontSize: 21, fontWeight: '800', marginLeft: 10, letterSpacing: 0.5 },
+  header: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    overflow: 'hidden',
+  },
+  logoMark: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: C.neon,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: C.neon,
+    shadowOpacity: 0.7,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
+  },
+  logoMarkTxt: { color: '#031004', fontSize: 24, fontWeight: '900' },
+  headerTxt: { flex: 1, marginHorizontal: 12, alignItems: 'flex-end' },
+  brand: { color: C.text, fontSize: 22, fontWeight: '800', letterSpacing: 0.4 },
+  brandAccent: { color: C.neon },
+  tag: { color: C.muted, fontSize: 11, marginTop: 1, writingDirection: 'rtl' },
+  tgPill: {
+    borderWidth: 1,
+    borderColor: C.neonDim,
+    borderRadius: 999,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(57,255,20,0.07)',
+  },
+  tgPillTxt: { color: C.neon, fontSize: 12, fontWeight: '700' },
 
-  /* power button */
-  hero: { height: 330, alignItems: 'center', justifyContent: 'center', marginTop: 18 },
-  halo: { position: 'absolute', width: 300, height: 300, borderRadius: 150 },
-  ringBox: { position: 'absolute', width: RING_SIZE, height: RING_SIZE },
-  thinRing: { position: 'absolute', width: 226, height: 226, borderRadius: 113, borderWidth: 1, borderColor: '#2A3A82' },
-  disc: { width: 216, height: 216, borderRadius: 108, backgroundColor: '#120E2E', alignItems: 'center', justifyContent: 'center' },
-  pwr: { width: 74, height: 74 },
-  pwrRing: { position: 'absolute', left: 3, top: 8, width: 68, height: 66, borderRadius: 34, borderWidth: 5 },
-  pwrGap: { position: 'absolute', left: 24, top: 0, width: 26, height: 20, backgroundColor: '#120E2E' },
-  pwrBar: { position: 'absolute', left: 34, top: 0, width: 6, height: 38, borderRadius: 3 },
+  warn: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.danger,
+    backgroundColor: 'rgba(255,59,92,0.08)',
+  },
+  warnTxt: { color: C.danger, fontSize: 12, textAlign: 'right', writingDirection: 'rtl', lineHeight: 19 },
 
-  status: { color: C.text, fontSize: 27, fontWeight: '800', textAlign: 'center', lineHeight: 40 },
-  statusSub: { color: C.mute, fontSize: 15, textAlign: 'center', lineHeight: 26, marginTop: 4, paddingHorizontal: 10 },
-  msgBox: { backgroundColor: 'rgba(255,77,106,0.12)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8, marginTop: 14 },
-  msgTxt: { color: '#FF8FA3', fontSize: 14, textAlign: 'center', lineHeight: 22 },
+  hero: { alignItems: 'center', paddingTop: 22, paddingBottom: 14 },
+  btnWrap: { width: 270, height: 270, alignItems: 'center', justifyContent: 'center' },
+  ringLayer: {
+    position: 'absolute',
+    width: 270,
+    height: 270,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  halo: { position: 'absolute', width: BTN + 70, height: BTN + 70, borderRadius: (BTN + 70) / 2, opacity: 0.1 },
+  ring: {
+    position: 'absolute',
+    width: BTN,
+    height: BTN,
+    borderRadius: BTN / 2,
+    borderWidth: 2,
+  },
+  btn: {
+    width: BTN,
+    height: BTN,
+    borderRadius: BTN / 2,
+    borderWidth: 3,
+    backgroundColor: C.btnBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.9,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 22,
+  },
+  spinner: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    width: BTN - 22,
+    height: BTN - 22,
+    borderRadius: (BTN - 22) / 2,
+    borderWidth: 3,
+    borderColor: 'transparent',
+  },
+  powerBox: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
+  powerRing: { width: 56, height: 56, borderRadius: 28, borderWidth: 5 },
+  powerGap: { position: 'absolute', top: -2, width: 22, height: 24, backgroundColor: C.btnBg },
+  powerBar: { position: 'absolute', top: 0, width: 5, height: 30, borderRadius: 3 },
 
-  /* cards */
-  card: { backgroundColor: 'rgba(23,20,52,0.82)', borderWidth: 1, borderColor: C.line, borderRadius: 22, overflow: 'hidden' },
-  cardHead: { color: C.mute, fontSize: 14, marginBottom: 4, lineHeight: 24 },
-  secTitle: { color: C.mute, fontSize: 14, marginTop: 24, marginBottom: 10, paddingHorizontal: 6, lineHeight: 24 },
-  note: { color: C.mute, fontSize: 12.5, lineHeight: 20, marginTop: 12, paddingHorizontal: 4 },
-  footer: { color: '#5E6290', fontSize: 12, lineHeight: 20, marginTop: 18, paddingHorizontal: 6 },
+  stateTitle: { fontSize: 26, fontWeight: '900', marginTop: 2, letterSpacing: 0.5 },
+  msgRow: { flexDirection: 'row-reverse', alignItems: 'center', marginTop: 8, paddingHorizontal: 12 },
+  resultDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  resultDotTxt: { color: '#031004', fontSize: 12, fontWeight: '900' },
+  msg: { color: C.text, fontSize: 14, textAlign: 'center', writingDirection: 'rtl', flexShrink: 1 },
+  dnsLine: { color: C.muted, fontSize: 12, marginTop: 8, letterSpacing: 0.4 },
 
-  /* rows */
-  row: { alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14 },
-  iconBox: { width: 44, height: 44, borderRadius: 13, backgroundColor: C.iconBg, alignItems: 'center', justifyContent: 'center' },
-  iconTxt: { fontSize: 20, color: C.iconFg, lineHeight: 26 },
-  rowTitle: { color: C.text, fontSize: 17, fontWeight: '600', lineHeight: 26 },
-  rowSub: { color: C.mute, fontSize: 13.5, lineHeight: 22, marginTop: 1 },
-  sep: { height: 1, backgroundColor: C.line },
-  chev: { color: C.mute, fontSize: 28, lineHeight: 30, paddingHorizontal: 4 },
+  card: {
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 18,
+    padding: 14,
+    marginTop: 12,
+  },
+  pubgCard: { borderColor: C.neonDim, backgroundColor: C.cardHi },
+  cardTitle: {
+    color: C.text,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'right',
+    writingDirection: 'rtl',
+    marginBottom: 10,
+  },
+  pubgHead: { alignItems: 'flex-end', flex: 1 },
+  pubgSub: { color: C.muted, fontSize: 12, marginTop: -6, marginBottom: 8, writingDirection: 'rtl' },
+  rowBetween: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
 
-  /* header */
-  header: { height: 54, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { color: C.text, fontSize: 21, fontWeight: '800', lineHeight: 32 },
-  backBtn: { position: 'absolute', top: 6, width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
-  backTxt: { color: C.blue, fontSize: 40, lineHeight: 44 },
+  chips: { flexDirection: 'row-reverse', flexWrap: 'wrap' },
+  chip: {
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginLeft: 8,
+    marginBottom: 8,
+    backgroundColor: '#060D07',
+  },
+  chipSel: {
+    borderColor: C.neon,
+    backgroundColor: 'rgba(57,255,20,0.12)',
+  },
+  chipTxt: { color: C.muted, fontSize: 13, fontWeight: '600' },
+  chipTxtSel: { color: C.neon },
+  customBox: { marginTop: 2 },
+  dim: { opacity: 0.45 },
+  hint: { color: C.muted, fontSize: 11, textAlign: 'right', writingDirection: 'rtl', marginTop: 4 },
 
-  /* language switch */
-  seg: { backgroundColor: '#1A1740', borderRadius: 16, padding: 4 },
-  segBtn: { flex: 1, height: 50, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  segOn: { backgroundColor: '#2F3DFF' },
-  segTxt: { color: C.mute, fontSize: 17, fontWeight: '700', lineHeight: 26 },
+  input: {
+    backgroundColor: '#050B06',
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 12,
+    color: C.text,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    textAlign: 'right',
+    marginBottom: 8,
+  },
+  inputLtr: { textAlign: 'left' },
+  error: { color: C.danger, fontSize: 12, textAlign: 'right', writingDirection: 'rtl', marginBottom: 8 },
+  addBtn: {
+    backgroundColor: C.neon,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 6,
+    shadowColor: C.neon,
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
+  addBtnTxt: { color: '#031004', fontSize: 15, fontWeight: '900' },
+  empty: { color: C.muted, fontSize: 12, textAlign: 'right', writingDirection: 'rtl', marginTop: 8 },
 
-  /* games */
-  gameRow: { alignItems: 'center', paddingVertical: 8, paddingHorizontal: 6, borderRadius: 16, marginTop: 4 },
-  gameSel: { backgroundColor: 'rgba(0,163,255,0.10)' },
-  gameName: { flex: 1, color: C.text, fontSize: 17, marginHorizontal: 14, lineHeight: 26 },
-  check: { color: C.green, fontSize: 20, fontWeight: '900', width: 20, textAlign: 'center' },
-  moreBtn: { alignItems: 'center', paddingTop: 14, paddingBottom: 4 },
-  moreTxt: { color: C.mute, fontSize: 15, lineHeight: 24 },
+  row: {
+    flexDirection: 'row-reverse',
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.line,
+  },
+  domain: { color: C.text, fontSize: 14, flex: 1, textAlign: 'right', marginRight: 10 },
+  appRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: C.line,
+    marginTop: 4,
+  },
+  appInfo: { flex: 1, alignItems: 'flex-end', marginLeft: 8 },
+  appName: { color: C.text, fontSize: 15, fontWeight: '700', writingDirection: 'rtl' },
+  domainSmall: { color: C.muted, fontSize: 12, marginTop: 2 },
+  appActions: { flexDirection: 'row', alignItems: 'center' },
 
-  /* channel button */
-  joinBtn: { alignItems: 'center', marginTop: 14, backgroundColor: 'rgba(23,20,52,0.9)', borderWidth: 1, borderColor: C.line, borderRadius: 26, paddingHorizontal: 18, paddingVertical: 16 },
-  plane: { color: C.blue, fontSize: 22, lineHeight: 28, transform: [{ rotate: '-20deg' }] },
-  joinTxt: { flex: 1, color: C.text, fontSize: 16, marginHorizontal: 12, lineHeight: 26 },
+  mini: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    marginLeft: 6,
+  },
+  miniTxt: { fontSize: 12, fontWeight: '800' },
+  badge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeTxt: { fontSize: 13, fontWeight: '900' },
 
-  /* results */
-  resTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  resName: { color: C.text, fontSize: 14.5, fontWeight: '600', lineHeight: 22, flex: 1, marginRight: 8 },
-  resMs: { fontSize: 14, fontWeight: '800' },
-  barBg: { height: 5, borderRadius: 3, backgroundColor: '#1D1A44', marginTop: 6, overflow: 'hidden' },
-  barFill: { height: 5, borderRadius: 3 },
-
-  /* custom dns */
-  chips: { flexDirection: 'row', flexWrap: 'wrap' },
-  chip: { borderWidth: 1, borderColor: C.line, backgroundColor: C.panel, borderRadius: 18, paddingHorizontal: 16, paddingVertical: 8, marginLeft: 8, marginBottom: 8 },
-  chipOn: { backgroundColor: '#2F3DFF', borderColor: '#2F3DFF' },
-  chipTxt: { color: C.text, fontWeight: '700', fontSize: 14, lineHeight: 22 },
-  fieldLabel: { color: C.mute, fontSize: 12, marginBottom: 5 },
-  input: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 12, color: C.text, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, textAlign: 'left', writingDirection: 'ltr' },
-  btn: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 16, paddingVertical: 14, alignItems: 'center' },
-  btnOn: { backgroundColor: '#2F3DFF', borderColor: '#2F3DFF' },
-  btnTxt: { color: C.text, fontWeight: '800', fontSize: 15, lineHeight: 22 },
+  footer: { color: C.neonDim, textAlign: 'center', fontSize: 11, marginTop: 22, letterSpacing: 2 },
 });
