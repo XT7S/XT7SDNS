@@ -9,10 +9,6 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableArray
-import com.wireguard.android.backend.GoBackend
-import com.wireguard.android.backend.Tunnel
-import com.wireguard.config.Config
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -24,17 +20,6 @@ class DnsVpnModule(private val ctx: ReactApplicationContext) :
 
     private var pending: Promise? = null
     private var pendingDns: ArrayList<String>? = null
-    private var pendingWg: String? = null
-
-    // ---- WireGuard (embedded wireguard-go through com.wireguard.android:tunnel) ----
-    private var wgBackend: GoBackend? = null
-    @Volatile private var wgUp = false
-    private val wgTunnel = object : Tunnel {
-        override fun getName() = "abrino"
-        override fun onStateChange(newState: Tunnel.State) {
-            wgUp = newState == Tunnel.State.UP
-        }
-    }
 
     init {
         ctx.addActivityEventListener(this)
@@ -68,69 +53,16 @@ class DnsVpnModule(private val ctx: ReactApplicationContext) :
         }
     }
 
-    /** Starts a WireGuard tunnel from the text of a .conf file ([Interface] + [Peer]). */
-    @ReactMethod
-    fun startWireGuard(config: String, promise: Promise) {
-        val cfg = config.trim()
-        if (cfg.isEmpty()) {
-            promise.reject("NO_CONFIG", "Empty WireGuard config")
-            return
-        }
-        val act = ctx.currentActivity
-        if (act == null) {
-            promise.reject("NO_ACTIVITY", "No foreground activity")
-            return
-        }
-        val prep = VpnService.prepare(act)
-        if (prep == null) {
-            runWireGuard(cfg, promise)
-        } else {
-            pending = promise
-            pendingWg = cfg
-            act.startActivityForResult(prep, REQ_VPN)
-        }
-    }
-
-    private fun runWireGuard(cfg: String, promise: Promise) {
-        Thread {
-            try {
-                stopDnsService()
-                val parsed = Config.parse(ByteArrayInputStream(cfg.toByteArray(Charsets.UTF_8)))
-                val be = wgBackend ?: GoBackend(ctx.applicationContext).also { wgBackend = it }
-                be.setState(wgTunnel, Tunnel.State.UP, parsed)
-                wgUp = true
-                promise.resolve(true)
-            } catch (ex: Exception) {
-                wgUp = false
-                promise.reject("WG_FAIL", ex.message ?: "WireGuard failed")
-            }
-        }.start()
-    }
-
-    private fun stopDnsService() {
-        ctx.startService(Intent(ctx, DnsVpnService::class.java).setAction(DnsVpnService.ACTION_STOP))
-    }
-
     @ReactMethod
     fun stop(promise: Promise) {
-        stopDnsService()
-        if (wgUp) {
-            Thread {
-                try {
-                    wgBackend?.setState(wgTunnel, Tunnel.State.DOWN, null)
-                } catch (ex: Exception) {
-                }
-                wgUp = false
-                promise.resolve(true)
-            }.start()
-        } else {
-            promise.resolve(true)
-        }
+        val i = Intent(ctx, DnsVpnService::class.java).setAction(DnsVpnService.ACTION_STOP)
+        ctx.startService(i)
+        promise.resolve(true)
     }
 
     @ReactMethod
     fun isRunning(promise: Promise) {
-        promise.resolve(DnsVpnService.running || wgUp)
+        promise.resolve(DnsVpnService.running)
     }
 
     /** Measures one DNS round trip (ms) to [host]:53, or -1 on timeout. */
@@ -219,15 +151,11 @@ class DnsVpnModule(private val ctx: ReactApplicationContext) :
         if (requestCode != REQ_VPN) return
         val p = pending
         val l = pendingDns
-        val w = pendingWg
         pending = null
         pendingDns = null
-        pendingWg = null
         if (resultCode == Activity.RESULT_OK && l != null) {
             launch(l)
             p?.resolve(true)
-        } else if (resultCode == Activity.RESULT_OK && w != null && p != null) {
-            runWireGuard(w, p)
         } else {
             p?.reject("DENIED", "VPN permission denied")
         }
