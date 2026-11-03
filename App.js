@@ -30,25 +30,25 @@ const { DnsVpn } = NativeModules;
 const CHANNEL_URL = 'https://t.me/AbrinoDNS';
 // لینک اسم بالای صفحه (هر لینکی خواستی اینجا بذار)
 const BRAND_URL = 'https://t.me/AbrinoDNS';
-const VERSION = '1.1';
+const VERSION = '1.2';
 
 /* ------------------------------------------------------------------ */
 /*  Colors                                                             */
 /* ------------------------------------------------------------------ */
 const C = {
-  bg: '#04031A',
-  panel: '#0F0D2A',
-  panel2: '#171434',
-  line: '#241F4D',
-  blue: '#00A3FF',
-  purple: '#7B2CFF',
-  green: '#00E5A0',
-  deepGreen: '#031510',
-  teal: '#00B8D9',
-  iconBg: '#10264A',
-  iconFg: '#1E9BFF',
-  text: '#F3F5FF',
-  mute: '#8C90B5',
+  bg: '#120805',
+  panel: '#1C110A',
+  panel2: '#26170D',
+  line: '#3D2513',
+  blue: '#FFA94D',      // accent light (orange)
+  purple: '#FF5A1F',    // accent deep (red-orange)
+  green: '#FF8A1F',     // main accent (orange)
+  deepGreen: '#1A0C03',
+  teal: '#FFB020',
+  iconBg: '#3A1E0A',
+  iconFg: '#FF9A3D',
+  text: '#FFF4EA',
+  mute: '#B59A85',
   bad: '#FF4D6A',
   warn: '#FFB300',
 };
@@ -133,6 +133,18 @@ const T = {
     noValid: 'حداقل یک آدرس DNS معتبر وارد کن.',
     denied: 'اجازه VPN داده نشد.',
     footer: 'فقط درخواست‌های DNS از طریق VPN عبور می‌کنند؛ ترافیک بازی مستقیم می‌رود و سرعتش کم نمی‌شود.',
+    pingIs: 'پینگ',
+    vpnSec: 'وی‌پی‌ان',
+    wg: 'وایرگارد (WireGuard)',
+    wgSub: 'اتصال با فایل کانفیگ WireGuard',
+    ovpn: 'اوپن‌وی‌پی‌ان (OpenVPN)',
+    ovpnSub: 'اتصال با فایل کانفیگ ovpn',
+    cfgHint: 'محتوای فایل کانفیگ را اینجا پیست کن',
+    cfgNote: 'کانفیگ فقط روی همین گوشی ذخیره می‌شود. هم‌زمان فقط یک اتصال فعال است؛ با وصل شدن این، DNS خاموش می‌شود.',
+    connectVpn: 'اتصال',
+    wgInvalid: 'کانفیگ WireGuard باید بخش‌های [Interface] و [Peer] داشته باشد.',
+    ovpnInvalid: 'کانفیگ OpenVPN باید خط remote داشته باشد.',
+    vpnNoNative: 'این پروتکل هنوز در ماژول نیتیو APK نیست. ماژول را آپدیت کن.',
   },
   en: {
     settings: 'Settings',
@@ -186,6 +198,18 @@ const T = {
     noValid: 'Enter at least one valid DNS address.',
     denied: 'VPN permission was denied.',
     footer: 'Only DNS requests pass through the VPN; game traffic goes directly and is not slowed down.',
+    pingIs: 'Ping',
+    vpnSec: 'VPN',
+    wg: 'WireGuard',
+    wgSub: 'Connect with a WireGuard config file',
+    ovpn: 'OpenVPN',
+    ovpnSub: 'Connect with an .ovpn config file',
+    cfgHint: 'Paste the config file content here',
+    cfgNote: 'The config is stored on this phone only. Only one connection can be active; connecting this turns DNS off.',
+    connectVpn: 'Connect',
+    wgInvalid: 'WireGuard config needs [Interface] and [Peer] sections.',
+    ovpnInvalid: 'OpenVPN config needs a remote line.',
+    vpnNoNative: 'This protocol is not in the APK native module yet. Update the module.',
   },
 };
 
@@ -259,6 +283,18 @@ const scoreDns = async (cand, domains) => {
   return avg + failed * 100;
 };
 
+// real ping of the DNS that is running now (median of 3, ms) or null
+const measurePing = async (host, domain) => {
+  const vals = [];
+  for (let i = 0; i < 3; i += 1) {
+    const v = await q(host, domain);
+    if (v >= 0) vals.push(v);
+  }
+  if (!vals.length) return null;
+  vals.sort((a, b) => a - b);
+  return Math.max(1, Math.round(vals[Math.floor(vals.length / 2)]));
+};
+
 const scanGame = async (game) => {
   const doms = game.domains && game.domains.length ? game.domains : ['google.com'];
   let res = await Promise.all(DNS_LIST.map(async (c) => ({ c, ms: await scoreDns(c, doms) })));
@@ -280,9 +316,9 @@ const NET_DOTS = [
 function Background() {
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View style={[s.glow, { width: 460, height: 460, borderRadius: 230, top: 30, alignSelf: 'center', backgroundColor: 'rgba(0,120,255,0.05)' }]} />
-      <View style={[s.glow, { width: 320, height: 320, borderRadius: 160, top: 100, alignSelf: 'center', backgroundColor: 'rgba(90,40,255,0.07)' }]} />
-      <View style={[s.glow, { width: 420, height: 420, borderRadius: 210, bottom: 30, alignSelf: 'center', backgroundColor: 'rgba(120,30,200,0.06)' }]} />
+      <View style={[s.glow, { width: 460, height: 460, borderRadius: 230, top: 30, alignSelf: 'center', backgroundColor: 'rgba(255,138,31,0.06)' }]} />
+      <View style={[s.glow, { width: 320, height: 320, borderRadius: 160, top: 100, alignSelf: 'center', backgroundColor: 'rgba(255,90,0,0.08)' }]} />
+      <View style={[s.glow, { width: 420, height: 420, borderRadius: 210, bottom: 30, alignSelf: 'center', backgroundColor: 'rgba(255,60,0,0.06)' }]} />
       {NET_DOTS.map((d, i) => (
         <View key={i} style={{ position: 'absolute', left: d[0], top: d[1], width: d[2], height: d[2], borderRadius: d[2], backgroundColor: C.blue, opacity: d[3] }} />
       ))}
@@ -471,17 +507,17 @@ function PowerButton({ on, busy, onPress }) {
       >
         <Animated.View style={[s.disc, { transform: [{ scale: Animated.multiply(press, pop) }] }]}>
           {/* dark-green disc with soft green glow layers */}
-          <View style={[s.inner, { width: 128, height: 128, borderRadius: 64, backgroundColor: 'rgba(0,229,160,0.07)' }]} />
-          <View style={[s.inner, { width: 98, height: 98, borderRadius: 49, backgroundColor: 'rgba(0,229,160,0.10)' }]} />
-          <View style={[s.inner, { width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(0,229,160,0.12)' }]} />
-          <Animated.View style={[s.inner, { width: 128, height: 128, borderRadius: 64, backgroundColor: 'rgba(0,229,160,0.14)', opacity: act }]} />
-          <Animated.View style={[s.inner, { width: 98, height: 98, borderRadius: 49, backgroundColor: 'rgba(0,229,160,0.18)', opacity: act }]} />
-          <Animated.View style={[s.inner, { width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(0,229,160,0.24)', opacity: act }]} />
+          <View style={[s.inner, { width: 128, height: 128, borderRadius: 64, backgroundColor: 'rgba(255,138,31,0.07)' }]} />
+          <View style={[s.inner, { width: 98, height: 98, borderRadius: 49, backgroundColor: 'rgba(255,138,31,0.10)' }]} />
+          <View style={[s.inner, { width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(255,138,31,0.12)' }]} />
+          <Animated.View style={[s.inner, { width: 128, height: 128, borderRadius: 64, backgroundColor: 'rgba(255,138,31,0.14)', opacity: act }]} />
+          <Animated.View style={[s.inner, { width: 98, height: 98, borderRadius: 49, backgroundColor: 'rgba(255,138,31,0.18)', opacity: act }]} />
+          <Animated.View style={[s.inner, { width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(255,138,31,0.24)', opacity: act }]} />
           {busy ? (
             <ActivityIndicator size="large" color={C.green} />
           ) : (
             <View>
-              <Animated.View style={{ opacity: inv }}><Glyph color="#E9FFF6" /></Animated.View>
+              <Animated.View style={{ opacity: inv }}><Glyph color="#FFF1E3" /></Animated.View>
               <Animated.View style={[StyleSheet.absoluteFill, { opacity: act }]}><Glyph color={C.green} /></Animated.View>
             </View>
           )}
@@ -537,7 +573,7 @@ function Field({ label, value, onChangeText, placeholder, valid }) {
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#3C3F66"
+        placeholderTextColor="#6B5444"
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="visible-password"
@@ -577,7 +613,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [msg, setMsg] = useState('');
-  const [pings, setPings] = useState([]);
+  const [pingMs, setPingMs] = useState(null);
+  const [wgCfg, setWgCfg] = useState('');
+  const [ovpnCfg, setOvpnCfg] = useState('');
+  const [vpnType, setVpnType] = useState('wg'); // wg | ovpn
+  const [vpnErr, setVpnErr] = useState('');
   const [loaded, setLoaded] = useState(false);
 
   const autoDone = useRef(false);
@@ -608,6 +648,8 @@ export default function App() {
             if (p.v6b !== undefined) setV6b(p.v6b);
             if (typeof p.useV6 === 'boolean') setUseV6(p.useV6);
             if (p.preset) setPreset(p.preset);
+            if (typeof p.wgCfg === 'string') setWgCfg(p.wgCfg);
+            if (typeof p.ovpnCfg === 'string') setOvpnCfg(p.ovpnCfg);
             if (p.deviceId) id = p.deviceId;
           }
           setOn(await DnsVpn.isRunning());
@@ -625,14 +667,17 @@ export default function App() {
   /* save settings */
   useEffect(() => {
     if (!loaded || !DnsVpn) return;
-    DnsVpn.savePrefs(JSON.stringify({ lang, autoConnect, games, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId }));
-  }, [loaded, lang, autoConnect, games, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId]);
+    DnsVpn.savePrefs(JSON.stringify({ lang, autoConnect, games, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId, wgCfg, ovpnCfg }));
+  }, [loaded, lang, autoConnect, games, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId, wgCfg, ovpnCfg]);
+
+  /* ping is only shown while connected */
+  useEffect(() => { if (!on) setPingMs(null); }, [on]);
 
   /* Android back button */
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       if (screen !== 'home') {
-        setScreen(screen === 'custom' ? 'settings' : 'home');
+        setScreen(screen === 'custom' || screen === 'vpn' ? 'settings' : 'home');
         return true;
       }
       return false;
@@ -666,6 +711,7 @@ export default function App() {
     setBusy(true);
     try {
       let list;
+      let fallbackMs = null;
       if (m === 'custom') {
         list = customList();
         if (!list.length) throw new Error(t.noValid);
@@ -674,12 +720,18 @@ export default function App() {
         if (!res.length) throw new Error(t.noServer);
         const best = res[0];
         list = [...best.c.v4, ...(useV6 ? best.c.v6.filter(isV6) : [])];
+        fallbackMs = Math.max(1, Math.round(best.ms));
       }
       await DnsVpn.start(list);
       await new Promise((r) => setTimeout(r, 800));
       const running = await DnsVpn.isRunning();
       setOn(running);
       if (!running) setFailed(true);
+      else {
+        const dom = g.domains && g.domains.length ? g.domains[0] : 'google.com';
+        const ms = await measurePing(list[0], dom);
+        setPingMs(ms !== null ? ms : fallbackMs);
+      }
     } catch (e) {
       setMsg(e && e.code === 'DENIED' ? t.denied : (e && e.message) || '');
       setFailed(true);
@@ -687,6 +739,32 @@ export default function App() {
     setBusy(false);
   };
   connectRef.current = connect;
+
+  const connectVpn = async (type) => {
+    const cfg = (type === 'wg' ? wgCfg : ovpnCfg).trim();
+    setVpnErr('');
+    if (type === 'wg' ? !(cfg.includes('[Interface]') && cfg.includes('[Peer]')) : !/^\s*remote\s+/m.test(cfg)) {
+      setVpnErr(type === 'wg' ? t.wgInvalid : t.ovpnInvalid);
+      return;
+    }
+    const fn = DnsVpn && (type === 'wg' ? DnsVpn.startWireGuard : DnsVpn.startOpenVpn);
+    if (!fn) { setVpnErr(DnsVpn ? t.vpnNoNative : t.noModule); return; }
+    setBusy(true);
+    try {
+      if (on) { try { await DnsVpn.stop(); } catch (e) {} }
+      await fn.call(DnsVpn, cfg);
+      await new Promise((r) => setTimeout(r, 800));
+      const running = await DnsVpn.isRunning();
+      setOn(running);
+      setPingMs(null);
+      setFailed(!running);
+      if (running) setScreen('home');
+      else setVpnErr(t.failTxt);
+    } catch (e) {
+      setVpnErr(e && e.code === 'DENIED' ? t.denied : (e && e.message) || t.failTxt);
+    }
+    setBusy(false);
+  };
 
   const disconnect = async () => {
     if (!DnsVpn) return;
@@ -753,15 +831,6 @@ export default function App() {
     setV6a(p.v6[0] || ''); setV6b(p.v6[1] || '');
   };
 
-  const pingAll = async () => {
-    if (!DnsVpn || busy) return;
-    setBusy(true); setPings([]);
-    const list = [v4a, v4b, ...(useV6 ? [v6a, v6b] : [])].filter((a) => isV4(a) || isV6(a));
-    const res = await Promise.all(list.map(async (a) => ({ a, ms: await DnsVpn.ping(a) })));
-    setPings(res);
-    setBusy(false);
-  };
-
   const topPad = (Platform.OS === 'android' ? StatusBar.currentHeight || 24 : 44) + 6;
 
   /* ---------------- HOME ---------------- */
@@ -769,7 +838,7 @@ export default function App() {
     const status = busy ? 'work' : on ? 'ok' : failed ? 'fail' : 'idle';
     const title = status === 'work' ? t.connecting : status === 'ok' ? t.okTxt : status === 'fail' ? t.failTxt : t.notConnected;
     const color = status === 'ok' ? C.green : status === 'fail' ? C.bad : C.text;
-    const sub = status === 'idle' ? t.tapConnect : status === 'fail' ? msg : '';
+    const sub = status === 'idle' ? t.tapConnect : status === 'fail' ? msg : status === 'ok' && pingMs !== null ? `${t.pingIs}: ${fa ? toFa(pingMs) : pingMs} ms` : '';
     const shown = showAll ? games : games.slice(0, 3);
     const more = games.length - 3;
 
@@ -785,15 +854,15 @@ export default function App() {
         <PowerButton on={on} busy={busy} onPress={onPower} />
 
         <View style={[s.statusPill, {
-          borderColor: status === 'ok' ? 'rgba(0,229,160,0.4)' : status === 'fail' ? 'rgba(255,77,106,0.4)' : 'transparent',
-          backgroundColor: status === 'ok' ? 'rgba(0,229,160,0.10)' : status === 'fail' ? 'rgba(255,77,106,0.10)' : 'transparent',
+          borderColor: status === 'ok' ? 'rgba(255,138,31,0.4)' : status === 'fail' ? 'rgba(255,77,106,0.4)' : 'transparent',
+          backgroundColor: status === 'ok' ? 'rgba(255,138,31,0.10)' : status === 'fail' ? 'rgba(255,77,106,0.10)' : 'transparent',
         }]}>
           <Text style={[s.status, { color }]}>
             {status === 'ok' ? '✓  ' : status === 'fail' ? '✕  ' : ''}
             {title}
           </Text>
         </View>
-        {!!sub && <Text style={s.statusSub} numberOfLines={2}>{sub}</Text>}
+        {!!sub && <Text style={[s.statusSub, status === 'ok' && { color: C.green, fontSize: 15, fontWeight: '800' }]} numberOfLines={2}>{sub}</Text>}
 
         {/* games */}
         <View style={[s.card, { marginTop: 14, padding: 10 }]}>
@@ -815,14 +884,14 @@ export default function App() {
                 value={newName}
                 onChangeText={(v) => { setNewName(v); setFormErr(''); }}
                 placeholder={t.appName}
-                placeholderTextColor="#4A4D78"
+                placeholderTextColor="#6B5444"
                 style={[s.input, { textAlign: ta }]}
               />
               <TextInput
                 value={newDomain}
                 onChangeText={(v) => { setNewDomain(v); setFormErr(''); }}
                 placeholder={t.appDomain}
-                placeholderTextColor="#4A4D78"
+                placeholderTextColor="#6B5444"
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="url"
@@ -890,9 +959,15 @@ export default function App() {
           icon="⚡"
           title={t.autoConnect}
           sub={t.autoConnectSub}
-          right={<Switch value={autoConnect} onValueChange={setAutoConnect} trackColor={{ false: '#2A2850', true: '#14B886' }} thumbColor="#FFFFFF" />}
+          right={<Switch value={autoConnect} onValueChange={setAutoConnect} trackColor={{ false: '#3A2A1E', true: '#FF7A00' }} thumbColor="#FFFFFF" />}
         />
         <Row fa={fa} icon="🌐" title={t.customDns} sub={t.customDnsSub} onPress={() => setScreen('custom')} last />
+      </View>
+
+      <Text style={[s.secTitle, { textAlign: ta }]}>{t.vpnSec}</Text>
+      <View style={s.card}>
+        <Row fa={fa} icon="🛡" title={t.wg} sub={t.wgSub} onPress={() => { setVpnType('wg'); setVpnErr(''); setScreen('vpn'); }} />
+        <Row fa={fa} icon="🔒" title={t.ovpn} sub={t.ovpnSub} onPress={() => { setVpnType('ovpn'); setVpnErr(''); setScreen('vpn'); }} last />
       </View>
 
       <Text style={[s.secTitle, { textAlign: ta }]}>{t.language}</Text>
@@ -964,7 +1039,7 @@ export default function App() {
       <View style={[s.card, { padding: 14, marginTop: 12 }]}>
         <View style={[s.headRow, { flexDirection: rowDir }]}>
           <Text style={s.cardHead}>{t.v6}</Text>
-          <Switch value={useV6} onValueChange={setUseV6} trackColor={{ false: '#2A2850', true: '#14B886' }} thumbColor="#FFFFFF" />
+          <Switch value={useV6} onValueChange={setUseV6} trackColor={{ false: '#3A2A1E', true: '#FF7A00' }} thumbColor="#FFFFFF" />
         </View>
         <View style={{ opacity: useV6 ? 1 : 0.3 }} pointerEvents={useV6 ? 'auto' : 'none'}>
           <Field label="DNS 1" value={v6a} onChangeText={edit(setV6a)} placeholder="2001:4860:4860::8888" valid={isV6(v6a)} />
@@ -973,9 +1048,6 @@ export default function App() {
       </View>
 
       <View style={{ flexDirection: 'row', marginTop: 14 }}>
-        <TouchableOpacity disabled={busy} activeOpacity={0.8} onPress={pingAll} style={[s.btn, { flex: 1, marginRight: 10, opacity: busy ? 0.5 : 1 }]}>
-          <Text style={s.btnTxt}>{t.pingTest}</Text>
-        </TouchableOpacity>
         <TouchableOpacity
           disabled={busy}
           activeOpacity={0.8}
@@ -986,24 +1058,39 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {pings.length > 0 && (
-        <View style={[s.card, { padding: 14, marginTop: 14 }]}>
-          <Text style={[s.cardHead, { textAlign: ta }]}>{t.pingResult}</Text>
-          {pings.map((r) => (
-            <View key={r.a} style={{ marginTop: 10 }}>
-              <View style={s.resTop}>
-                <Text style={s.resName} numberOfLines={1}>{r.a}</Text>
-                <Text style={[s.resMs, { color: pingColor(r.ms) }]}>{r.ms < 0 ? 'timeout' : `${Math.round(r.ms)} ms`}</Text>
-              </View>
-              <View style={s.barBg}>
-                <View style={[s.barFill, { width: `${r.ms < 0 ? 100 : Math.max(8, Math.min(100, (r.ms / 200) * 100))}%`, backgroundColor: pingColor(r.ms) }]} />
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
     </ScrollView>
   );
+
+  /* ---------------- VPN (WireGuard / OpenVPN) ---------------- */
+  const renderVpn = () => {
+    const isWg = vpnType === 'wg';
+    const val = isWg ? wgCfg : ovpnCfg;
+    const setVal = isWg ? setWgCfg : setOvpnCfg;
+    return (
+      <ScrollView contentContainerStyle={[s.scroll, { paddingTop: topPad }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <Header fa={fa} title={isWg ? 'WireGuard' : 'OpenVPN'} onBack={() => setScreen('settings')} />
+        <View style={[s.card, { padding: 14, marginTop: 16 }]}>
+          <Text style={[s.cardHead, { textAlign: ta }]}>{t.cfgHint}</Text>
+          <TextInput
+            value={val}
+            onChangeText={(v) => { setVal(v); setVpnErr(''); }}
+            placeholder={isWg ? '[Interface]\nPrivateKey = ...\n\n[Peer]\nPublicKey = ...' : 'client\nremote server.example.com 1194'}
+            placeholderTextColor="#6B5444"
+            multiline
+            autoCapitalize="none"
+            autoCorrect={false}
+            textAlignVertical="top"
+            style={[s.input, { height: 240, marginTop: 10, fontSize: 12.5 }]}
+          />
+          {!!vpnErr && <Text style={[s.err, { textAlign: ta }]}>{vpnErr}</Text>}
+        </View>
+        <Text style={[s.note, { textAlign: ta, marginTop: 10 }]}>{t.cfgNote}</Text>
+        <TouchableOpacity disabled={busy} activeOpacity={0.8} onPress={() => connectVpn(vpnType)} style={[s.btn, s.btnOn, { marginTop: 14, opacity: busy ? 0.5 : 1 }]}>
+          <Text style={[s.btnTxt, { color: '#fff' }]}>{busy ? t.connecting : t.connectVpn}</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    );
+  };
 
   return (
     <View style={s.root}>
@@ -1013,6 +1100,7 @@ export default function App() {
         {screen === 'home' && renderHome()}
         {screen === 'settings' && renderSettings()}
         {screen === 'custom' && renderCustom()}
+        {screen === 'vpn' && renderVpn()}
       </Appear>
     </View>
   );
@@ -1030,7 +1118,7 @@ const s = StyleSheet.create({
   gear: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   gearTxt: { color: C.mute, fontSize: 23, lineHeight: 28 },
   logoWrap: { flexDirection: 'row', alignItems: 'center' },
-  logoBox: { width: 27, height: 27, borderRadius: 8, backgroundColor: '#1B2BFF', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#5E7BFF', overflow: 'hidden' },
+  logoBox: { width: 27, height: 27, borderRadius: 8, backgroundColor: '#FF7A00', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FFB066', overflow: 'hidden' },
   logoLetter: { color: '#fff', fontSize: 18, fontWeight: '900', lineHeight: 22 },
   logoBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, backgroundColor: C.purple },
   logoText: { color: C.text, fontSize: 16.5, fontWeight: '800', marginLeft: 9, letterSpacing: 0.4 },
@@ -1038,8 +1126,8 @@ const s = StyleSheet.create({
   hero: { height: 214, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   halo: { position: 'absolute', width: 212, height: 212, borderRadius: 106 },
   ringBox: { position: 'absolute', width: RING_SIZE, height: RING_SIZE },
-  thinRing: { position: 'absolute', width: 158, height: 158, borderRadius: 79, borderWidth: 1, borderColor: 'rgba(0,229,160,0.28)' },
-  disc: { width: 142, height: 142, borderRadius: 71, backgroundColor: '#03150F', borderWidth: 1.5, borderColor: 'rgba(0,229,160,0.35)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  thinRing: { position: 'absolute', width: 158, height: 158, borderRadius: 79, borderWidth: 1, borderColor: 'rgba(255,138,31,0.28)' },
+  disc: { width: 142, height: 142, borderRadius: 71, backgroundColor: '#1A0C03', borderWidth: 1.5, borderColor: 'rgba(255,138,31,0.35)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   inner: { position: 'absolute' },
   pwr: { width: 56, height: 56 },
   pwrRing: { position: 'absolute', left: 3, top: 6, width: 50, height: 50, borderRadius: 25, borderWidth: 4.5 },
@@ -1049,13 +1137,13 @@ const s = StyleSheet.create({
   statusPill: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 3, borderRadius: 18, borderWidth: 1 },
   statusSub: { color: C.mute, fontSize: 12.5, textAlign: 'center', lineHeight: 20, marginTop: 4, paddingHorizontal: 10 },
 
-  card: { backgroundColor: 'rgba(23,20,52,0.82)', borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden' },
+  card: { backgroundColor: 'rgba(38,23,13,0.85)', borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden' },
   cardHead: { color: C.mute, fontSize: 13, lineHeight: 22 },
   headRow: { alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   secTitle: { color: C.mute, fontSize: 13, marginTop: 20, marginBottom: 8, paddingHorizontal: 6, lineHeight: 22 },
   note: { color: C.mute, fontSize: 12, lineHeight: 19, marginTop: 8, paddingHorizontal: 2 },
   err: { color: C.bad, fontSize: 12.5, lineHeight: 20, marginTop: 6 },
-  footer: { color: '#5E6290', fontSize: 11.5, lineHeight: 19, marginTop: 14, paddingHorizontal: 6 },
+  footer: { color: '#8A6E5A', fontSize: 11.5, lineHeight: 19, marginTop: 14, paddingHorizontal: 6 },
 
   row: { alignItems: 'center', paddingHorizontal: 14, paddingVertical: 11 },
   iconBox: { width: 38, height: 38, borderRadius: 11, backgroundColor: C.iconBg, alignItems: 'center', justifyContent: 'center' },
@@ -1070,18 +1158,18 @@ const s = StyleSheet.create({
   backBtn: { position: 'absolute', top: 3, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt: { color: C.blue, fontSize: 36, lineHeight: 40 },
 
-  seg: { backgroundColor: '#1A1740', borderRadius: 14, padding: 3 },
+  seg: { backgroundColor: '#2A190C', borderRadius: 14, padding: 3 },
   segBtn: { flex: 1, height: 42, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  segOn: { backgroundColor: '#14B886' },
+  segOn: { backgroundColor: '#FF7A00' },
   segTxt: { color: C.mute, fontSize: 15, fontWeight: '700', lineHeight: 22 },
 
   pill: { borderWidth: 1, borderColor: C.line, backgroundColor: C.panel2, borderRadius: 14, paddingHorizontal: 11, paddingVertical: 4 },
-  pillOn: { backgroundColor: '#14B886', borderColor: '#14B886' },
+  pillOn: { backgroundColor: '#FF7A00', borderColor: '#FF7A00' },
   pillTxt: { color: C.text, fontSize: 12.5, fontWeight: '700', lineHeight: 20 },
   addBox: { backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 14, padding: 10, marginTop: 8, marginBottom: 4 },
 
   gameRow: { alignItems: 'center', paddingVertical: 4, paddingHorizontal: 6, borderRadius: 12, marginTop: 2 },
-  gameHi: { backgroundColor: 'rgba(0,229,160,0.10)', borderWidth: 1, borderColor: 'rgba(0,229,160,0.25)', borderRadius: 12 },
+  gameHi: { backgroundColor: 'rgba(255,138,31,0.10)', borderWidth: 1, borderColor: 'rgba(255,138,31,0.25)', borderRadius: 12 },
   iconBoxSm: { width: 28, height: 28, borderRadius: 9, backgroundColor: C.iconBg, alignItems: 'center', justifyContent: 'center' },
   iconTxtSm: { fontSize: 14, lineHeight: 20 },
   gameName: { flex: 1, color: C.text, fontSize: 13.5, marginHorizontal: 11, lineHeight: 22 },
@@ -1091,23 +1179,23 @@ const s = StyleSheet.create({
   moreBtn: { alignItems: 'center', paddingTop: 10, paddingBottom: 2 },
   moreTxt: { color: C.mute, fontSize: 13, lineHeight: 22 },
 
-  joinBtn: { alignItems: 'center', marginTop: 10, backgroundColor: 'rgba(23,20,52,0.9)', borderWidth: 1, borderColor: C.line, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9 },
+  joinBtn: { alignItems: 'center', marginTop: 10, backgroundColor: 'rgba(38,23,13,0.92)', borderWidth: 1, borderColor: C.line, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9 },
   plane: { color: C.blue, fontSize: 19, lineHeight: 24, transform: [{ rotate: '-20deg' }] },
   joinTxt: { flex: 1, color: C.text, fontSize: 14, marginHorizontal: 10, lineHeight: 22 },
 
   resTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   resName: { color: C.text, fontSize: 13.5, fontWeight: '600', lineHeight: 20, flex: 1, marginRight: 8 },
   resMs: { fontSize: 13, fontWeight: '800' },
-  barBg: { height: 4, borderRadius: 2, backgroundColor: '#1D1A44', marginTop: 5, overflow: 'hidden' },
+  barBg: { height: 4, borderRadius: 2, backgroundColor: '#3A2412', marginTop: 5, overflow: 'hidden' },
   barFill: { height: 4, borderRadius: 2 },
 
   chips: { flexDirection: 'row', flexWrap: 'wrap' },
   chip: { borderWidth: 1, borderColor: C.line, backgroundColor: C.panel, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6, marginLeft: 7, marginBottom: 7 },
-  chipOn: { backgroundColor: '#14B886', borderColor: '#14B886' },
+  chipOn: { backgroundColor: '#FF7A00', borderColor: '#FF7A00' },
   chipTxt: { color: C.text, fontWeight: '700', fontSize: 13, lineHeight: 20 },
   fieldLabel: { color: C.mute, fontSize: 11.5, marginBottom: 4 },
   input: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 11, color: C.text, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13.5, textAlign: 'left' },
   btn: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 14, paddingVertical: 11, alignItems: 'center' },
-  btnOn: { backgroundColor: '#14B886', borderColor: '#14B886' },
+  btnOn: { backgroundColor: '#FF7A00', borderColor: '#FF7A00' },
   btnTxt: { color: C.text, fontWeight: '800', fontSize: 14, lineHeight: 20 },
 });
