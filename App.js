@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -7,6 +7,7 @@ import {
   LayoutAnimation,
   Linking,
   NativeModules,
+  PermissionsAndroid,
   Platform,
   Pressable,
   ScrollView,
@@ -30,28 +31,34 @@ const { DnsVpn } = NativeModules;
 const CHANNEL_URL = 'https://t.me/AbrinoDNS';
 // لینک اسم بالای صفحه (هر لینکی خواستی اینجا بذار)
 const BRAND_URL = 'https://t.me/AbrinoDNS';
-const VERSION = '1.2';
+const VERSION = '1.3';
 
 /* ------------------------------------------------------------------ */
 /*  Colors                                                             */
 /* ------------------------------------------------------------------ */
-const C = {
-  bg: '#120805',
-  panel: '#1C110A',
-  panel2: '#26170D',
-  line: '#3D2513',
-  blue: '#FFA94D',      // accent light (orange)
-  purple: '#FF5A1F',    // accent deep (red-orange)
-  green: '#FF8A1F',     // main accent (orange)
-  deepGreen: '#1A0C03',
-  teal: '#FFB020',
-  iconBg: '#3A1E0A',
-  iconFg: '#FF9A3D',
-  text: '#FFF4EA',
-  mute: '#B59A85',
-  bad: '#FF4D6A',
-  warn: '#FFB300',
+const ORANGE = {
+  bg: '#120805', panel: '#1C110A', panel2: '#26170D', line: '#3D2513',
+  blue: '#FFA94D', purple: '#FF5A1F', green: '#FF8A1F', teal: '#FFB020',
+  iconBg: '#3A1E0A', iconFg: '#FF9A3D', text: '#FFF4EA', mute: '#B59A85',
+  bad: '#FF4D6A', warn: '#FFB300',
+  rgb: '255,138,31', rgb2: '255,90,0', rgb3: '255,60,0', cardRgb: '38,23,13',
+  btn: '#FF7A00', disc: '#1A0C03', track: '#3A2A1E', seg: '#2A190C', bar: '#3A2412',
+  logoBorder: '#FFB066', footer: '#8A6E5A', ph: '#6B5444',
 };
+
+// same layout, green colors: used while the VPN is connected
+const GREEN = {
+  bg: '#031009', panel: '#0A1D14', panel2: '#0F2A1E', line: '#1B3D2E',
+  blue: '#3DF0B0', purple: '#00B8D9', green: '#00E5A0', teal: '#00B8D9',
+  iconBg: '#0C3326', iconFg: '#2EEBA8', text: '#EFFFF8', mute: '#8DB5A4',
+  bad: '#FF4D6A', warn: '#FFB300',
+  rgb: '0,229,160', rgb2: '0,184,217', rgb3: '0,160,120', cardRgb: '12,36,27',
+  btn: '#14B886', disc: '#03150F', track: '#1E3A2E', seg: '#0F2A1F', bar: '#1B3D2E',
+  logoBorder: '#5EF0C0', footer: '#5E8A78', ph: '#3C6652',
+};
+
+const ThemeCtx = createContext(null);
+const useTheme = () => useContext(ThemeCtx);
 
 /* ------------------------------------------------------------------ */
 /*  Data                                                               */
@@ -144,6 +151,17 @@ const T = {
     connectVpn: 'اتصال',
     wgInvalid: 'کانفیگ WireGuard باید بخش‌های [Interface] و [Peer] داشته باشد.',
     ovpnInvalid: 'کانفیگ OpenVPN باید خط remote داشته باشد.',
+    v2ray: 'V2Ray',
+    v2raySub: 'لینک vmess / vless / trojan / ss یا کانفیگ JSON',
+    importFile: 'انتخاب فایل',
+    scanQr: 'اسکن QR',
+    v2Invalid: 'لینک یا کانفیگ V2Ray معتبر نیست.',
+    noPicker: 'کتابخانه‌ی انتخاب فایل در APK نیست (react-native-document-picker).',
+    noCamera: 'کتابخانه‌ی اسکن در APK نیست (react-native-camera-kit).',
+    camDenied: 'اجازه‌ی دوربین داده نشد.',
+    fileFail: 'خواندن فایل ناموفق بود.',
+    scanTitle: 'اسکن QR',
+    scanHint: 'QR کانفیگ را داخل کادر بگیر',
     vpnNoNative: 'این پروتکل هنوز در ماژول نیتیو APK نیست. ماژول را آپدیت کن.',
   },
   en: {
@@ -209,6 +227,17 @@ const T = {
     connectVpn: 'Connect',
     wgInvalid: 'WireGuard config needs [Interface] and [Peer] sections.',
     ovpnInvalid: 'OpenVPN config needs a remote line.',
+    v2ray: 'V2Ray',
+    v2raySub: 'vmess / vless / trojan / ss link or JSON config',
+    importFile: 'Choose file',
+    scanQr: 'Scan QR',
+    v2Invalid: 'V2Ray link or config is not valid.',
+    noPicker: 'File picker library is not in the APK (react-native-document-picker).',
+    noCamera: 'Scanner library is not in the APK (react-native-camera-kit).',
+    camDenied: 'Camera permission was denied.',
+    fileFail: 'Could not read the file.',
+    scanTitle: 'Scan QR',
+    scanHint: 'Point the camera at the config QR',
     vpnNoNative: 'This protocol is not in the APK native module yet. Update the module.',
   },
 };
@@ -225,7 +254,6 @@ const isV6 = (x) =>
   x.split(':').length <= 8;
 
 const toFa = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[d]);
-const pingColor = (ms) => (ms < 0 ? C.bad : ms < 50 ? C.green : ms < 120 ? C.warn : '#FF7A00');
 
 const cleanDomain = (x) => {
   const d = x.toLowerCase().replace(/^[a-z]+:\/\//, '').split('/')[0].split(':')[0];
@@ -314,11 +342,12 @@ const NET_DOTS = [
 ];
 
 function Background() {
+  const { C, s } = useTheme();
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <View style={[s.glow, { width: 460, height: 460, borderRadius: 230, top: 30, alignSelf: 'center', backgroundColor: 'rgba(255,138,31,0.06)' }]} />
-      <View style={[s.glow, { width: 320, height: 320, borderRadius: 160, top: 100, alignSelf: 'center', backgroundColor: 'rgba(255,90,0,0.08)' }]} />
-      <View style={[s.glow, { width: 420, height: 420, borderRadius: 210, bottom: 30, alignSelf: 'center', backgroundColor: 'rgba(255,60,0,0.06)' }]} />
+      <View style={[s.glow, { width: 460, height: 460, borderRadius: 230, top: 30, alignSelf: 'center', backgroundColor: `rgba(${C.rgb},0.06)` }]} />
+      <View style={[s.glow, { width: 320, height: 320, borderRadius: 160, top: 100, alignSelf: 'center', backgroundColor: `rgba(${C.rgb2},0.08)` }]} />
+      <View style={[s.glow, { width: 420, height: 420, borderRadius: 210, bottom: 30, alignSelf: 'center', backgroundColor: `rgba(${C.rgb3},0.06)` }]} />
       {NET_DOTS.map((d, i) => (
         <View key={i} style={{ position: 'absolute', left: d[0], top: d[1], width: d[2], height: d[2], borderRadius: d[2], backgroundColor: C.blue, opacity: d[3] }} />
       ))}
@@ -327,6 +356,7 @@ function Background() {
 }
 
 function Logo() {
+  const { C, s } = useTheme();
   return (
     <TouchableOpacity activeOpacity={0.7} onPress={openBrand} style={s.logoWrap} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
       <View style={s.logoBox}>
@@ -384,6 +414,7 @@ function Appear({ children, style, dy = 10, duration = 260 }) {
 
 /* one game row: animates in, animates out before it is removed */
 function GameRow({ g, sel, editing, canDelete, fa, onPick, onRemove }) {
+  const { C, s } = useTheme();
   const a = useRef(new Animated.Value(0)).current;
   const hi = useRef(new Animated.Value(sel ? 1 : 0)).current;
   const ed = useRef(new Animated.Value(editing ? 1 : 0)).current;
@@ -433,6 +464,7 @@ function GameRow({ g, sel, editing, canDelete, fa, onPick, onRemove }) {
 }
 
 function Glyph({ color }) {
+  const { C, s } = useTheme();
   return (
     <View style={[s.pwr, { transform: [{ scale: 0.82 }] }]}>
       <View style={[s.pwrRing, { borderColor: color, borderTopColor: 'transparent' }]} />
@@ -442,6 +474,7 @@ function Glyph({ color }) {
 }
 
 function PowerButton({ on, busy, onPress }) {
+  const { C, s } = useTheme();
   const pulse = useRef(new Animated.Value(0)).current;
   const spin = useRef(new Animated.Value(0)).current;
   const act = useRef(new Animated.Value(0)).current;
@@ -479,8 +512,8 @@ function PowerButton({ on, busy, onPress }) {
     }
   }, [on, act, pop]);
 
-  const ringIdle = useMemo(() => makeRing(C.purple, C.blue), []);
-  const ringOn = useMemo(() => makeRing(C.teal, C.green), []);
+  const ringIdle = useMemo(() => makeRing(ORANGE.purple, ORANGE.blue), []);
+  const ringOn = useMemo(() => makeRing(GREEN.teal, GREEN.green), []);
 
   const inv = Animated.subtract(1, act);
   const haloOp = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.05, 0.2] });
@@ -489,8 +522,8 @@ function PowerButton({ on, busy, onPress }) {
 
   return (
     <View style={s.hero}>
-      <Animated.View pointerEvents="none" renderToHardwareTextureAndroid shouldRasterizeIOS style={[s.halo, { backgroundColor: C.blue, opacity: Animated.multiply(haloOp, inv), transform: [{ scale: haloScale }] }]} />
-      <Animated.View pointerEvents="none" renderToHardwareTextureAndroid shouldRasterizeIOS style={[s.halo, { backgroundColor: C.green, opacity: Animated.multiply(haloOp, act), transform: [{ scale: haloScale }] }]} />
+      <Animated.View pointerEvents="none" renderToHardwareTextureAndroid shouldRasterizeIOS style={[s.halo, { backgroundColor: ORANGE.blue, opacity: Animated.multiply(haloOp, inv), transform: [{ scale: haloScale }] }]} />
+      <Animated.View pointerEvents="none" renderToHardwareTextureAndroid shouldRasterizeIOS style={[s.halo, { backgroundColor: GREEN.green, opacity: Animated.multiply(haloOp, act), transform: [{ scale: haloScale }] }]} />
 
       <Animated.View pointerEvents="none" renderToHardwareTextureAndroid shouldRasterizeIOS style={[s.ringBox, { transform: [{ rotate: deg }] }]}>
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: inv }]}>{ringIdle}</Animated.View>
@@ -507,18 +540,18 @@ function PowerButton({ on, busy, onPress }) {
       >
         <Animated.View style={[s.disc, { transform: [{ scale: Animated.multiply(press, pop) }] }]}>
           {/* dark-green disc with soft green glow layers */}
-          <View style={[s.inner, { width: 128, height: 128, borderRadius: 64, backgroundColor: 'rgba(255,138,31,0.07)' }]} />
-          <View style={[s.inner, { width: 98, height: 98, borderRadius: 49, backgroundColor: 'rgba(255,138,31,0.10)' }]} />
-          <View style={[s.inner, { width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(255,138,31,0.12)' }]} />
-          <Animated.View style={[s.inner, { width: 128, height: 128, borderRadius: 64, backgroundColor: 'rgba(255,138,31,0.14)', opacity: act }]} />
-          <Animated.View style={[s.inner, { width: 98, height: 98, borderRadius: 49, backgroundColor: 'rgba(255,138,31,0.18)', opacity: act }]} />
-          <Animated.View style={[s.inner, { width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(255,138,31,0.24)', opacity: act }]} />
+          <View style={[s.inner, { width: 128, height: 128, borderRadius: 64, backgroundColor: `rgba(${ORANGE.rgb},0.07)` }]} />
+          <View style={[s.inner, { width: 98, height: 98, borderRadius: 49, backgroundColor: `rgba(${ORANGE.rgb},0.10)` }]} />
+          <View style={[s.inner, { width: 68, height: 68, borderRadius: 34, backgroundColor: `rgba(${ORANGE.rgb},0.12)` }]} />
+          <Animated.View style={[s.inner, { width: 128, height: 128, borderRadius: 64, backgroundColor: `rgba(${GREEN.rgb},0.14)`, opacity: act }]} />
+          <Animated.View style={[s.inner, { width: 98, height: 98, borderRadius: 49, backgroundColor: `rgba(${GREEN.rgb},0.18)`, opacity: act }]} />
+          <Animated.View style={[s.inner, { width: 68, height: 68, borderRadius: 34, backgroundColor: `rgba(${GREEN.rgb},0.24)`, opacity: act }]} />
           {busy ? (
             <ActivityIndicator size="large" color={C.green} />
           ) : (
             <View>
               <Animated.View style={{ opacity: inv }}><Glyph color="#FFF1E3" /></Animated.View>
-              <Animated.View style={[StyleSheet.absoluteFill, { opacity: act }]}><Glyph color={C.green} /></Animated.View>
+              <Animated.View style={[StyleSheet.absoluteFill, { opacity: act }]}><Glyph color={GREEN.green} /></Animated.View>
             </View>
           )}
         </Animated.View>
@@ -528,6 +561,7 @@ function PowerButton({ on, busy, onPress }) {
 }
 
 function Row({ fa, icon, title, sub, onPress, right, last }) {
+  const { C, s } = useTheme();
   const dir = fa ? 'row-reverse' : 'row';
   const ta = fa ? 'right' : 'left';
   const inner = (
@@ -554,6 +588,7 @@ function Row({ fa, icon, title, sub, onPress, right, last }) {
 }
 
 function Header({ fa, title, onBack }) {
+  const { C, s } = useTheme();
   return (
     <View style={s.header}>
       <Text style={s.headerTitle}>{title}</Text>
@@ -565,6 +600,7 @@ function Header({ fa, title, onBack }) {
 }
 
 function Field({ label, value, onChangeText, placeholder, valid }) {
+  const { C, s } = useTheme();
   const bad = value.length > 0 && !valid;
   return (
     <View style={{ marginTop: 10 }}>
@@ -573,7 +609,7 @@ function Field({ label, value, onChangeText, placeholder, valid }) {
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#6B5444"
+        placeholderTextColor={C.ph}
         autoCapitalize="none"
         autoCorrect={false}
         keyboardType="visible-password"
@@ -616,13 +652,17 @@ export default function App() {
   const [pingMs, setPingMs] = useState(null);
   const [wgCfg, setWgCfg] = useState('');
   const [ovpnCfg, setOvpnCfg] = useState('');
-  const [vpnType, setVpnType] = useState('wg'); // wg | ovpn
+  const [v2Cfg, setV2Cfg] = useState('');
+  const [vpnType, setVpnType] = useState('wg'); // wg | ovpn | v2
+  const [scanOpen, setScanOpen] = useState(false);
   const [vpnErr, setVpnErr] = useState('');
   const [loaded, setLoaded] = useState(false);
 
   const autoDone = useRef(false);
   const connectRef = useRef(null);
 
+  const theme = useMemo(() => { const P = on ? GREEN : ORANGE; return { C: P, s: makeStyles(P) }; }, [on]);
+  const { C, s } = theme;
   const t = T[lang];
   const fa = lang === 'fa';
   const ta = fa ? 'right' : 'left';
@@ -650,6 +690,7 @@ export default function App() {
             if (p.preset) setPreset(p.preset);
             if (typeof p.wgCfg === 'string') setWgCfg(p.wgCfg);
             if (typeof p.ovpnCfg === 'string') setOvpnCfg(p.ovpnCfg);
+            if (typeof p.v2Cfg === 'string') setV2Cfg(p.v2Cfg);
             if (p.deviceId) id = p.deviceId;
           }
           setOn(await DnsVpn.isRunning());
@@ -667,8 +708,8 @@ export default function App() {
   /* save settings */
   useEffect(() => {
     if (!loaded || !DnsVpn) return;
-    DnsVpn.savePrefs(JSON.stringify({ lang, autoConnect, games, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId, wgCfg, ovpnCfg }));
-  }, [loaded, lang, autoConnect, games, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId, wgCfg, ovpnCfg]);
+    DnsVpn.savePrefs(JSON.stringify({ lang, autoConnect, games, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId, wgCfg, ovpnCfg, v2Cfg }));
+  }, [loaded, lang, autoConnect, games, gameId, mode, v4a, v4b, v6a, v6b, useV6, preset, deviceId, wgCfg, ovpnCfg, v2Cfg]);
 
   /* ping is only shown while connected */
   useEffect(() => { if (!on) setPingMs(null); }, [on]);
@@ -676,6 +717,7 @@ export default function App() {
   /* Android back button */
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (scanOpen) { setScanOpen(false); return true; }
       if (screen !== 'home') {
         setScreen(screen === 'custom' || screen === 'vpn' ? 'settings' : 'home');
         return true;
@@ -683,7 +725,7 @@ export default function App() {
       return false;
     });
     return () => sub.remove();
-  }, [screen]);
+  }, [screen, scanOpen]);
 
   /* auto connect when the app opens */
   useEffect(() => {
@@ -740,14 +782,22 @@ export default function App() {
   };
   connectRef.current = connect;
 
+  const getCfg = (type) => (type === 'wg' ? wgCfg : type === 'ovpn' ? ovpnCfg : v2Cfg);
+  const setCfgFor = (type, v) => (type === 'wg' ? setWgCfg : type === 'ovpn' ? setOvpnCfg : setV2Cfg)(v);
+
   const connectVpn = async (type) => {
-    const cfg = (type === 'wg' ? wgCfg : ovpnCfg).trim();
+    const cfg = getCfg(type).trim();
     setVpnErr('');
-    if (type === 'wg' ? !(cfg.includes('[Interface]') && cfg.includes('[Peer]')) : !/^\s*remote\s+/m.test(cfg)) {
-      setVpnErr(type === 'wg' ? t.wgInvalid : t.ovpnInvalid);
+    const valid = type === 'wg'
+      ? cfg.includes('[Interface]') && cfg.includes('[Peer]')
+      : type === 'ovpn'
+        ? /^\s*remote\s+/m.test(cfg)
+        : /^(vmess|vless|trojan|ss):\/\//im.test(cfg) || cfg.startsWith('{');
+    if (!valid) {
+      setVpnErr(type === 'wg' ? t.wgInvalid : type === 'ovpn' ? t.ovpnInvalid : t.v2Invalid);
       return;
     }
-    const fn = DnsVpn && (type === 'wg' ? DnsVpn.startWireGuard : DnsVpn.startOpenVpn);
+    const fn = DnsVpn && (type === 'wg' ? DnsVpn.startWireGuard : type === 'ovpn' ? DnsVpn.startOpenVpn : DnsVpn.startV2Ray);
     if (!fn) { setVpnErr(DnsVpn ? t.vpnNoNative : t.noModule); return; }
     setBusy(true);
     try {
@@ -764,6 +814,45 @@ export default function App() {
       setVpnErr(e && e.code === 'DENIED' ? t.denied : (e && e.message) || t.failTxt);
     }
     setBusy(false);
+  };
+
+  // pick a config file (.conf / .ovpn / .json / .txt) and read it
+  const importFile = async (type) => {
+    setVpnErr('');
+    let DP = null;
+    try { DP = require('react-native-document-picker'); } catch (e) {}
+    if (!DP) { setVpnErr(t.noPicker); return; }
+    try {
+      const picker = DP.default && DP.default.pickSingle ? DP.default : DP;
+      const res = await picker.pickSingle({ type: [(picker.types && picker.types.allFiles) || '*/*'], copyTo: 'cachesDirectory' });
+      const r = Array.isArray(res) ? res[0] : res;
+      const uri = (r && (r.fileCopyUri || r.uri)) || '';
+      const txt = await (await fetch(uri)).text();
+      if (!txt.trim()) throw new Error('empty');
+      setCfgFor(type, txt);
+    } catch (e) {
+      const c = e && e.code;
+      if (c !== 'DOCUMENT_PICKER_CANCELED' && c !== 'OPERATION_CANCELED') setVpnErr(t.fileFail);
+    }
+  };
+
+  // scan a QR that holds the config
+  const openScan = async () => {
+    setVpnErr('');
+    let ck = null;
+    try { ck = require('react-native-camera-kit'); } catch (e) {}
+    if (!ck || !ck.Camera) { setVpnErr(t.noCamera); return; }
+    if (Platform.OS === 'android') {
+      const g = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
+      if (g !== PermissionsAndroid.RESULTS.GRANTED) { setVpnErr(t.camDenied); return; }
+    }
+    setScanOpen(true);
+  };
+  const onScanned = (e) => {
+    const v = e && e.nativeEvent && e.nativeEvent.codeStringValue;
+    if (!v) return;
+    setScanOpen(false);
+    setCfgFor(vpnType, v);
   };
 
   const disconnect = async () => {
@@ -854,8 +943,8 @@ export default function App() {
         <PowerButton on={on} busy={busy} onPress={onPower} />
 
         <View style={[s.statusPill, {
-          borderColor: status === 'ok' ? 'rgba(255,138,31,0.4)' : status === 'fail' ? 'rgba(255,77,106,0.4)' : 'transparent',
-          backgroundColor: status === 'ok' ? 'rgba(255,138,31,0.10)' : status === 'fail' ? 'rgba(255,77,106,0.10)' : 'transparent',
+          borderColor: status === 'ok' ? `rgba(${C.rgb},0.4)` : status === 'fail' ? 'rgba(255,77,106,0.4)' : 'transparent',
+          backgroundColor: status === 'ok' ? `rgba(${C.rgb},0.10)` : status === 'fail' ? 'rgba(255,77,106,0.10)' : 'transparent',
         }]}>
           <Text style={[s.status, { color }]}>
             {status === 'ok' ? '✓  ' : status === 'fail' ? '✕  ' : ''}
@@ -884,14 +973,14 @@ export default function App() {
                 value={newName}
                 onChangeText={(v) => { setNewName(v); setFormErr(''); }}
                 placeholder={t.appName}
-                placeholderTextColor="#6B5444"
+                placeholderTextColor={C.ph}
                 style={[s.input, { textAlign: ta }]}
               />
               <TextInput
                 value={newDomain}
                 onChangeText={(v) => { setNewDomain(v); setFormErr(''); }}
                 placeholder={t.appDomain}
-                placeholderTextColor="#6B5444"
+                placeholderTextColor={C.ph}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="url"
@@ -959,7 +1048,7 @@ export default function App() {
           icon="⚡"
           title={t.autoConnect}
           sub={t.autoConnectSub}
-          right={<Switch value={autoConnect} onValueChange={setAutoConnect} trackColor={{ false: '#3A2A1E', true: '#FF7A00' }} thumbColor="#FFFFFF" />}
+          right={<Switch value={autoConnect} onValueChange={setAutoConnect} trackColor={{ false: C.track, true: C.btn }} thumbColor="#FFFFFF" />}
         />
         <Row fa={fa} icon="🌐" title={t.customDns} sub={t.customDnsSub} onPress={() => setScreen('custom')} last />
       </View>
@@ -967,7 +1056,8 @@ export default function App() {
       <Text style={[s.secTitle, { textAlign: ta }]}>{t.vpnSec}</Text>
       <View style={s.card}>
         <Row fa={fa} icon="🛡" title={t.wg} sub={t.wgSub} onPress={() => { setVpnType('wg'); setVpnErr(''); setScreen('vpn'); }} />
-        <Row fa={fa} icon="🔒" title={t.ovpn} sub={t.ovpnSub} onPress={() => { setVpnType('ovpn'); setVpnErr(''); setScreen('vpn'); }} last />
+        <Row fa={fa} icon="🔒" title={t.ovpn} sub={t.ovpnSub} onPress={() => { setVpnType('ovpn'); setVpnErr(''); setScreen('vpn'); }} />
+        <Row fa={fa} icon="🚀" title={t.v2ray} sub={t.v2raySub} onPress={() => { setVpnType('v2'); setVpnErr(''); setScreen('vpn'); }} last />
       </View>
 
       <Text style={[s.secTitle, { textAlign: ta }]}>{t.language}</Text>
@@ -1039,7 +1129,7 @@ export default function App() {
       <View style={[s.card, { padding: 14, marginTop: 12 }]}>
         <View style={[s.headRow, { flexDirection: rowDir }]}>
           <Text style={s.cardHead}>{t.v6}</Text>
-          <Switch value={useV6} onValueChange={setUseV6} trackColor={{ false: '#3A2A1E', true: '#FF7A00' }} thumbColor="#FFFFFF" />
+          <Switch value={useV6} onValueChange={setUseV6} trackColor={{ false: C.track, true: C.btn }} thumbColor="#FFFFFF" />
         </View>
         <View style={{ opacity: useV6 ? 1 : 0.3 }} pointerEvents={useV6 ? 'auto' : 'none'}>
           <Field label="DNS 1" value={v6a} onChangeText={edit(setV6a)} placeholder="2001:4860:4860::8888" valid={isV6(v6a)} />
@@ -1061,21 +1151,44 @@ export default function App() {
     </ScrollView>
   );
 
-  /* ---------------- VPN (WireGuard / OpenVPN) ---------------- */
+  /* ---------------- VPN (WireGuard / OpenVPN / V2Ray) ---------------- */
   const renderVpn = () => {
-    const isWg = vpnType === 'wg';
-    const val = isWg ? wgCfg : ovpnCfg;
-    const setVal = isWg ? setWgCfg : setOvpnCfg;
+    const title = vpnType === 'wg' ? 'WireGuard' : vpnType === 'ovpn' ? 'OpenVPN' : 'V2Ray';
+    const val = getCfg(vpnType);
+    const ph = vpnType === 'wg'
+      ? '[Interface]\nPrivateKey = ...\n\n[Peer]\nPublicKey = ...'
+      : vpnType === 'ovpn' ? 'client\nremote server.example.com 1194' : 'vless://...  vmess://...  trojan://...';
+
+    if (scanOpen) {
+      let Cam = null;
+      try { Cam = require('react-native-camera-kit').Camera; } catch (e) {}
+      return (
+        <View style={{ flex: 1, paddingTop: topPad }}>
+          <Header fa={fa} title={t.scanTitle} onBack={() => setScanOpen(false)} />
+          <Text style={[s.note, { textAlign: 'center', marginVertical: 10 }]}>{t.scanHint}</Text>
+          {Cam ? <Cam style={{ flex: 1, margin: 16, borderRadius: 16, overflow: 'hidden' }} scanBarcode showFrame onReadCode={onScanned} /> : null}
+        </View>
+      );
+    }
+
     return (
       <ScrollView contentContainerStyle={[s.scroll, { paddingTop: topPad }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <Header fa={fa} title={isWg ? 'WireGuard' : 'OpenVPN'} onBack={() => setScreen('settings')} />
-        <View style={[s.card, { padding: 14, marginTop: 16 }]}>
+        <Header fa={fa} title={title} onBack={() => setScreen('settings')} />
+        <View style={{ flexDirection: 'row', marginTop: 16 }}>
+          <TouchableOpacity activeOpacity={0.8} onPress={() => importFile(vpnType)} style={[s.btn, { flex: 1, marginRight: 10 }]}>
+            <Text style={s.btnTxt}>{`📁  ${t.importFile}`}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity activeOpacity={0.8} onPress={openScan} style={[s.btn, { flex: 1 }]}>
+            <Text style={s.btnTxt}>{`▣  ${t.scanQr}`}</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={[s.card, { padding: 14, marginTop: 12 }]}>
           <Text style={[s.cardHead, { textAlign: ta }]}>{t.cfgHint}</Text>
           <TextInput
             value={val}
-            onChangeText={(v) => { setVal(v); setVpnErr(''); }}
-            placeholder={isWg ? '[Interface]\nPrivateKey = ...\n\n[Peer]\nPublicKey = ...' : 'client\nremote server.example.com 1194'}
-            placeholderTextColor="#6B5444"
+            onChangeText={(v) => { setCfgFor(vpnType, v); setVpnErr(''); }}
+            placeholder={ph}
+            placeholderTextColor={C.ph}
             multiline
             autoCapitalize="none"
             autoCorrect={false}
@@ -1093,6 +1206,7 @@ export default function App() {
   };
 
   return (
+    <ThemeCtx.Provider value={theme}>
     <View style={s.root}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <Background />
@@ -1103,13 +1217,14 @@ export default function App() {
         {screen === 'vpn' && renderVpn()}
       </Appear>
     </View>
+    </ThemeCtx.Provider>
   );
 }
 
 /* ------------------------------------------------------------------ */
 /*  Styles (Persian text: extra line height, no letterSpacing)         */
 /* ------------------------------------------------------------------ */
-const s = StyleSheet.create({
+const makeStyles = (C) => StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   scroll: { paddingHorizontal: 16, paddingBottom: 28 },
   glow: { position: 'absolute' },
@@ -1118,7 +1233,7 @@ const s = StyleSheet.create({
   gear: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   gearTxt: { color: C.mute, fontSize: 23, lineHeight: 28 },
   logoWrap: { flexDirection: 'row', alignItems: 'center' },
-  logoBox: { width: 27, height: 27, borderRadius: 8, backgroundColor: '#FF7A00', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#FFB066', overflow: 'hidden' },
+  logoBox: { width: 27, height: 27, borderRadius: 8, backgroundColor: C.btn, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.logoBorder, overflow: 'hidden' },
   logoLetter: { color: '#fff', fontSize: 18, fontWeight: '900', lineHeight: 22 },
   logoBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 4, backgroundColor: C.purple },
   logoText: { color: C.text, fontSize: 16.5, fontWeight: '800', marginLeft: 9, letterSpacing: 0.4 },
@@ -1126,8 +1241,8 @@ const s = StyleSheet.create({
   hero: { height: 214, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
   halo: { position: 'absolute', width: 212, height: 212, borderRadius: 106 },
   ringBox: { position: 'absolute', width: RING_SIZE, height: RING_SIZE },
-  thinRing: { position: 'absolute', width: 158, height: 158, borderRadius: 79, borderWidth: 1, borderColor: 'rgba(255,138,31,0.28)' },
-  disc: { width: 142, height: 142, borderRadius: 71, backgroundColor: '#1A0C03', borderWidth: 1.5, borderColor: 'rgba(255,138,31,0.35)', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  thinRing: { position: 'absolute', width: 158, height: 158, borderRadius: 79, borderWidth: 1, borderColor: `rgba(${C.rgb},0.28)` },
+  disc: { width: 142, height: 142, borderRadius: 71, backgroundColor: C.disc, borderWidth: 1.5, borderColor: `rgba(${C.rgb},0.35)`, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   inner: { position: 'absolute' },
   pwr: { width: 56, height: 56 },
   pwrRing: { position: 'absolute', left: 3, top: 6, width: 50, height: 50, borderRadius: 25, borderWidth: 4.5 },
@@ -1137,13 +1252,13 @@ const s = StyleSheet.create({
   statusPill: { alignSelf: 'center', paddingHorizontal: 18, paddingVertical: 3, borderRadius: 18, borderWidth: 1 },
   statusSub: { color: C.mute, fontSize: 12.5, textAlign: 'center', lineHeight: 20, marginTop: 4, paddingHorizontal: 10 },
 
-  card: { backgroundColor: 'rgba(38,23,13,0.85)', borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden' },
+  card: { backgroundColor: `rgba(${C.cardRgb},0.85)`, borderWidth: 1, borderColor: C.line, borderRadius: 16, overflow: 'hidden' },
   cardHead: { color: C.mute, fontSize: 13, lineHeight: 22 },
   headRow: { alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
   secTitle: { color: C.mute, fontSize: 13, marginTop: 20, marginBottom: 8, paddingHorizontal: 6, lineHeight: 22 },
   note: { color: C.mute, fontSize: 12, lineHeight: 19, marginTop: 8, paddingHorizontal: 2 },
   err: { color: C.bad, fontSize: 12.5, lineHeight: 20, marginTop: 6 },
-  footer: { color: '#8A6E5A', fontSize: 11.5, lineHeight: 19, marginTop: 14, paddingHorizontal: 6 },
+  footer: { color: C.footer, fontSize: 11.5, lineHeight: 19, marginTop: 14, paddingHorizontal: 6 },
 
   row: { alignItems: 'center', paddingHorizontal: 14, paddingVertical: 11 },
   iconBox: { width: 38, height: 38, borderRadius: 11, backgroundColor: C.iconBg, alignItems: 'center', justifyContent: 'center' },
@@ -1158,18 +1273,18 @@ const s = StyleSheet.create({
   backBtn: { position: 'absolute', top: 3, width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   backTxt: { color: C.blue, fontSize: 36, lineHeight: 40 },
 
-  seg: { backgroundColor: '#2A190C', borderRadius: 14, padding: 3 },
+  seg: { backgroundColor: C.seg, borderRadius: 14, padding: 3 },
   segBtn: { flex: 1, height: 42, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  segOn: { backgroundColor: '#FF7A00' },
+  segOn: { backgroundColor: C.btn },
   segTxt: { color: C.mute, fontSize: 15, fontWeight: '700', lineHeight: 22 },
 
   pill: { borderWidth: 1, borderColor: C.line, backgroundColor: C.panel2, borderRadius: 14, paddingHorizontal: 11, paddingVertical: 4 },
-  pillOn: { backgroundColor: '#FF7A00', borderColor: '#FF7A00' },
+  pillOn: { backgroundColor: C.btn, borderColor: C.btn },
   pillTxt: { color: C.text, fontSize: 12.5, fontWeight: '700', lineHeight: 20 },
   addBox: { backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 14, padding: 10, marginTop: 8, marginBottom: 4 },
 
   gameRow: { alignItems: 'center', paddingVertical: 4, paddingHorizontal: 6, borderRadius: 12, marginTop: 2 },
-  gameHi: { backgroundColor: 'rgba(255,138,31,0.10)', borderWidth: 1, borderColor: 'rgba(255,138,31,0.25)', borderRadius: 12 },
+  gameHi: { backgroundColor: `rgba(${C.rgb},0.10)`, borderWidth: 1, borderColor: `rgba(${C.rgb},0.25)`, borderRadius: 12 },
   iconBoxSm: { width: 28, height: 28, borderRadius: 9, backgroundColor: C.iconBg, alignItems: 'center', justifyContent: 'center' },
   iconTxtSm: { fontSize: 14, lineHeight: 20 },
   gameName: { flex: 1, color: C.text, fontSize: 13.5, marginHorizontal: 11, lineHeight: 22 },
@@ -1179,23 +1294,23 @@ const s = StyleSheet.create({
   moreBtn: { alignItems: 'center', paddingTop: 10, paddingBottom: 2 },
   moreTxt: { color: C.mute, fontSize: 13, lineHeight: 22 },
 
-  joinBtn: { alignItems: 'center', marginTop: 10, backgroundColor: 'rgba(38,23,13,0.92)', borderWidth: 1, borderColor: C.line, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9 },
+  joinBtn: { alignItems: 'center', marginTop: 10, backgroundColor: `rgba(${C.cardRgb},0.92)`, borderWidth: 1, borderColor: C.line, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 9 },
   plane: { color: C.blue, fontSize: 19, lineHeight: 24, transform: [{ rotate: '-20deg' }] },
   joinTxt: { flex: 1, color: C.text, fontSize: 14, marginHorizontal: 10, lineHeight: 22 },
 
   resTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   resName: { color: C.text, fontSize: 13.5, fontWeight: '600', lineHeight: 20, flex: 1, marginRight: 8 },
   resMs: { fontSize: 13, fontWeight: '800' },
-  barBg: { height: 4, borderRadius: 2, backgroundColor: '#3A2412', marginTop: 5, overflow: 'hidden' },
+  barBg: { height: 4, borderRadius: 2, backgroundColor: C.bar, marginTop: 5, overflow: 'hidden' },
   barFill: { height: 4, borderRadius: 2 },
 
   chips: { flexDirection: 'row', flexWrap: 'wrap' },
   chip: { borderWidth: 1, borderColor: C.line, backgroundColor: C.panel, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 6, marginLeft: 7, marginBottom: 7 },
-  chipOn: { backgroundColor: '#FF7A00', borderColor: '#FF7A00' },
+  chipOn: { backgroundColor: C.btn, borderColor: C.btn },
   chipTxt: { color: C.text, fontWeight: '700', fontSize: 13, lineHeight: 20 },
   fieldLabel: { color: C.mute, fontSize: 11.5, marginBottom: 4 },
   input: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 11, color: C.text, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13.5, textAlign: 'left' },
   btn: { backgroundColor: C.panel2, borderWidth: 1, borderColor: C.line, borderRadius: 14, paddingVertical: 11, alignItems: 'center' },
-  btnOn: { backgroundColor: '#FF7A00', borderColor: '#FF7A00' },
+  btnOn: { backgroundColor: C.btn, borderColor: C.btn },
   btnTxt: { color: C.text, fontWeight: '800', fontSize: 14, lineHeight: 20 },
 });
