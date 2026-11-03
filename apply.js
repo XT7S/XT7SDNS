@@ -16,6 +16,11 @@ e.android = e.android || {};
 if (!e.android.package) e.android.package = 'com.gamedns.app';
 e.plugins = e.plugins || [];
 if (!e.plugins.includes('./plugins/withDnsVpn')) e.plugins.push('./plugins/withDnsVpn');
+// WireGuard engine (needs plugins/withWireGuard.js)
+if (!e.plugins.includes('./plugins/withWireGuard')) e.plugins.push('./plugins/withWireGuard');
+// camera permission for QR scanning
+e.android.permissions = e.android.permissions || [];
+if (!e.android.permissions.includes('CAMERA')) e.android.permissions.push('CAMERA');
 
 fs.writeFileSync('app.json', JSON.stringify(j, null, 2));
 console.log('app.json updated. Android package:', e.android.package);
